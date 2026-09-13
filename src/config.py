@@ -25,8 +25,19 @@ OP_ROUTE_FVS = "f-v-s"
 STANDARD_CROSSING_MINUTES = 20
 
 # Gemini Settings
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# Commute Schedule Configuration (Pacific Time / America/Los_Angeles)
+COMMUTE_SCHEDULE = {
+    # Monday - Friday Morning Commute: 6:00 AM - 9:15 AM
+    "am_start": (6, 0),
+    "am_end": (9, 15),
+    # Monday - Friday Afternoon & Sports Return: 2:30 PM - 6:00 PM
+    "pm_start": (14, 30),
+    "pm_end": (18, 0),
+    "offpeak_interval_minutes": 60,
+}
 
 # AWS Settings
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "vashon-ferry-commute")

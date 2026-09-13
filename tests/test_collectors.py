@@ -161,5 +161,64 @@ class TestFerryCommutePipeline(unittest.TestCase):
             self.assertIn("All systems operational.", content)
 
 
+    def test_commute_window_governor(self):
+        from src.lambda_handler import is_school_commute_window
+
+        # Monday 7:30 AM (Peak morning)
+        mon_morning = datetime(2026, 9, 14, 7, 30, tzinfo=timezone(timedelta(hours=-7)))
+        in_commute, label = is_school_commute_window(mon_morning)
+        self.assertTrue(in_commute)
+        self.assertIn("Morning Commute", label)
+
+        # Monday 4:00 PM (Peak afternoon / sports)
+        mon_pm = datetime(2026, 9, 14, 16, 0, tzinfo=timezone(timedelta(hours=-7)))
+        in_commute, label = is_school_commute_window(mon_pm)
+        self.assertTrue(in_commute)
+        self.assertIn("Afternoon", label)
+
+        # Wednesday 11:30 AM (Off-peak midday)
+        wed_midday = datetime(2026, 9, 16, 11, 30, tzinfo=timezone(timedelta(hours=-7)))
+        in_commute, label = is_school_commute_window(wed_midday)
+        self.assertFalse(in_commute)
+        self.assertIn("Off-Peak", label)
+
+        # Saturday 8:00 AM (Weekend off-peak)
+        sat = datetime(2026, 9, 19, 8, 0, tzinfo=timezone(timedelta(hours=-7)))
+        in_commute, label = is_school_commute_window(sat)
+        self.assertFalse(in_commute)
+        self.assertIn("Weekend", label)
+
+    def test_ai_state_fingerprinting_and_cache(self):
+        from src.analyzer.gemini_analyzer import compute_schedule_state_fingerprint
+
+        heuristic_base = {
+            "schedule_mode": "2-boat",
+            "bulletin_mode_reason": "Vessel mechanical issue",
+            "target_commute_day": "Monday",
+            "is_friday_pdd": False,
+            "am_commute": {"evaluated_targets": {"vhs": {"status": "ON_TIME", "delay_minutes": 0}}}
+        }
+        bulletins_base = {
+            "triangle_bulletins": [{"bulletin_id": "101", "title": "Fauntleroy / Vashon", "content": "Operating 2-boat"}]
+        }
+
+        fp1 = compute_schedule_state_fingerprint(heuristic_base, bulletins_base)
+        fp2 = compute_schedule_state_fingerprint(heuristic_base, bulletins_base)
+        self.assertEqual(fp1, fp2, "Identical inputs must yield identical fingerprints")
+
+        # Change schedule mode -> must change fingerprint
+        heuristic_modified = dict(heuristic_base)
+        heuristic_modified["schedule_mode"] = "3-boat"
+        fp3 = compute_schedule_state_fingerprint(heuristic_modified, bulletins_base)
+        self.assertNotEqual(fp1, fp3, "Changing schedule mode must alter fingerprint")
+
+        # Change bulletin text -> must change fingerprint
+        bulletins_modified = {
+            "triangle_bulletins": [{"bulletin_id": "102", "title": "Fauntleroy / Vashon", "content": "Restored 3-boat"}]
+        }
+        fp4 = compute_schedule_state_fingerprint(heuristic_base, bulletins_modified)
+        self.assertNotEqual(fp1, fp4, "Changing bulletins must alter fingerprint")
+
+
 if __name__ == "__main__":
     unittest.main()
