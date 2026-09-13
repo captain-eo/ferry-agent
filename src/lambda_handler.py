@@ -186,6 +186,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     ContentType="application/json",
                     CacheControl="no-cache, no-store, must-revalidate",
                 )
+
+            # Upload favicon.svg
+            if "favicon_svg" in files and Path(files["favicon_svg"]).exists():
+                with open(files["favicon_svg"], "rb") as f:
+                    s3.put_object(
+                        Bucket=bucket_name,
+                        Key="favicon.svg",
+                        Body=f.read(),
+                        ContentType="image/svg+xml",
+                        CacheControl="max-age=86400, public",
+                    )
                 
             uploaded = True
             s3_details = {

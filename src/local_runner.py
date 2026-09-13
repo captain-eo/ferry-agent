@@ -69,6 +69,15 @@ def run_pipeline(api_key: str = None, model: str = None, s3_bucket: str = None):
                     ContentType="application/json",
                     CacheControl="no-cache, no-store, must-revalidate",
                 )
+            if "favicon_svg" in files and Path(files["favicon_svg"]).exists():
+                with open(files["favicon_svg"], "rb") as f:
+                    s3.put_object(
+                        Bucket=s3_bucket,
+                        Key="favicon.svg",
+                        Body=f.read(),
+                        ContentType="image/svg+xml",
+                        CacheControl="max-age=86400, public",
+                    )
             print(f"✅ S3 upload complete!")
         except Exception as e:
             print(f"❌ Failed to upload to S3: {e}")
