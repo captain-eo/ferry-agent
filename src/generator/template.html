@@ -37,10 +37,6 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- Leaflet Map CSS & JS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
   <style>
     .pulse-dot {
       box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
@@ -51,22 +47,23 @@
       70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
       100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
-    #vessel-map {
-      height: 340px;
-      border-radius: 0.75rem;
-      z-index: 10;
-    }
-    .ferry-marker-icon {
-      transition: transform 0.6s linear;
-      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
+    .vessel-group {
+      transition: transform 0.9s linear;
     }
     .wake-trail {
       stroke-dasharray: 4, 4;
-      animation: wakeDash 1.2s linear infinite;
+      animation: wakeFlow 1.2s linear infinite;
     }
-    @keyframes wakeDash {
+    @keyframes wakeFlow {
       to { stroke-dashoffset: -8; }
     }
+    .dock-beacon {
+      animation: dockPulse 2s ease-in-out infinite;
+    }
+    @keyframes dockPulse {
+      0%, 100% { r: 5; opacity: 0.9; }
+      50% { r: 9; opacity: 0.3; }
+    }}
   </style>
 </head>
 <body class="h-full flex flex-col font-sans antialiased bg-slate-950 selection:bg-emerald-500 selection:text-white">
@@ -86,7 +83,7 @@
               Live Feed
             </span>
           </h1>
-          <p class="text-xs text-slate-400">Fauntleroy (West Seattle) ⇄ Vashon Island • Real-Time AIS Motion & VISD Commute</p>
+          <p class="text-xs text-slate-400">Fauntleroy (West Seattle) ⇄ Vashon Island • Native Vector Radar & VISD Commute</p>
         </div>
       </div>
 
@@ -186,32 +183,92 @@
       </div>
     </div>
 
-    <!-- LIVE RADAR & VESSEL POSITIONING (WITH REAL-TIME MOVEMENT) -->
+    <!-- LIVE NATIVE VECTOR RADAR (SVG) -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Live Map (2 cols on lg) -->
+      <!-- Live SVG Radar (2 cols on lg) -->
       <div class="lg:col-span-2 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
         <div class="flex items-center justify-between mb-3">
           <div>
             <h3 class="text-sm font-semibold text-white flex items-center gap-2">
               <i data-lucide="navigation" class="w-4 h-4 text-emerald-400"></i>
-              Live Triangle Route Radar
+              Live Triangle Route Radar (Native Vector Map)
               <span class="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
                 AIS Motion Active
               </span>
             </h3>
-            <p class="text-[11px] text-slate-400 mt-0.5">Live dead-reckoning animation based on WSDOT telemetry (speed & heading)</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">Self-contained SVG vector map • Continuous dead-reckoning animation</p>
           </div>
           <span class="text-xs text-slate-400">Fauntleroy • Vashon • Southworth</span>
         </div>
         
-        <div id="vessel-map"></div>
+        <!-- PURE SVG MAP CANVAS -->
+        <div class="relative w-full rounded-xl overflow-hidden border border-slate-800 bg-[#030712] shadow-inner">
+          <svg id="radar-svg" viewBox="0 0 800 500" class="w-full h-auto block select-none">
+            <defs>
+              <radialGradient id="waterGlow" cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stop-color="#081226" />
+                <stop offset="100%" stop-color="#020617" />
+              </radialGradient>
+              <pattern id="nauticalGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#0f172a" stroke-width="0.8" opacity="0.6" />
+              </pattern>
+            </defs>
+
+            <!-- Water Background -->
+            <rect width="800" height="500" fill="url(#waterGlow)" />
+            <rect width="800" height="500" fill="url(#nauticalGrid)" />
+
+            <!-- Geographic Landmasses -->
+            <g id="land-layer">
+              <path d="M 8.4,557.5 L 8.1,549.0 L 7.7,545.0 L 6.7,536.4 L 6.9,529.3 L 7.1,527.9 L 7.6,527.4 L 7.3,526.4 L 7.1,525.7 L 7.5,523.1 L 8.4,519.8 L 10.1,512.4 L 11.1,508.7 L 12.0,507.7 L 14.1,506.9 L 17.6,505.9 L 20.7,504.0 L 23.1,501.2 L 26.4,498.3 L 29.7,494.4 L 32.9,491.9 L 37.9,488.0 L 44.4,481.1 L 48.8,475.6 L 48.8,475.6 L 50.6,471.2 L 52.4,466.8 L 56.5,458.8 L 60.8,454.1 L 65.6,447.9 L 68.3,445.3 L 70.8,442.1 L 73.5,439.2 L 74.9,436.5 L 76.2,432.4 L 77.3,430.1 L 80.6,426.1 L 82.6,423.0 L 84.0,419.2 L 86.4,415.6 L 89.0,411.4 L 90.8,407.7 L 91.4,405.4 L 92.1,402.9 L 92.3,402.0 L 92.4,400.8 L 92.4,397.0 L 92.2,396.4 L 91.9,395.7 L 91.9,394.8 L 92.2,393.4 L 92.3,392.1 L 92.4,391.7 L 92.8,391.3 L 93.1,391.1 L 92.9,390.7 L 92.7,390.4 L 92.4,389.9 L 92.4,388.7 L 92.6,387.5 L 93.2,386.4 L 94.1,383.9 L 95.9,381.8 L 98.2,379.2 L 99.4,377.4 L 100.8,375.0 L 102.7,371.3 L 105.3,368.6 L 108.8,364.4 L 111.4,362.4 L 114.1,359.6 L 119.2,354.9 L 121.2,352.8 L 122.7,350.8 L 124.4,348.1 L 126.2,344.9 L 129.2,340.1 L 130.5,338.8 L 131.8,337.8 L 133.5,337.3 L 138.1,336.5 L 139.8,335.9 L 141.1,334.3 L 141.7,333.1 L 141.7,333.1 L 141.5,331.4 L 140.8,328.8 L 140.1,327.4 L 139.1,326.0 L 137.2,323.5 L 136.1,322.3 L 133.9,319.8 L 131.8,317.5 L 130.2,315.5 L 127.9,314.0 L 125.1,311.2 L 123.5,309.2 L 121.7,307.2 L 120.1,304.7 L 118.3,301.6 L 116.1,298.2 L 114.6,295.2 L 112.5,291.3 L 109.6,285.7 L 108.7,283.2 L 107.7,279.6 L 106.0,276.4 L 105.0,274.9 L 103.7,273.1 L 101.9,270.6 L 100.2,268.1 L 98.9,266.9 L 96.8,265.5 L 90.2,263.2 L 84.8,263.2 L 82.3,263.0 L 77.6,263.5 L 74.7,263.9 L 71.0,264.4 L 70.3,264.6 L 69.8,264.5 L 68.7,264.3 L 65.2,262.6 L 61.8,261.4 L 58.2,260.3 L 53.4,258.6 L 48.3,257.4 L 41.8,256.0 L 39.7,256.0 L 31.7,257.7 L 30.2,258.5 L 26.1,260.8 L 26.1,260.8 L 25.3,261.2 L 21.6,264.1 L 21.7,264.5 L 21.9,265.0 L 21.7,265.4 L 21.4,265.6 L 21.2,266.8 L 21.1,268.0 L 21.1,268.0 L 21.0,268.6 L 21.6,269.4 L 21.5,271.8 L 21.7,273.6 L 21.8,275.2 L 21.6,275.6 L 21.5,275.7 L 20.6,276.5 L 19.7,277.2 L 19.7,277.6 L 19.4,278.1 L 18.9,278.6 L 18.3,278.7 L 17.6,278.2 L 16.5,277.3 L 15.1,274.9 L 15.0,272.9 L 14.7,271.7 L 12.8,270.0 L 11.2,265.7 L 10.3,263.3 L 9.3,260.1 L 7.5,254.8 L 7.0,251.3 L 5.2,243.4 L 3.2,236.9 L 2.4,233.9 L 2.1,231.8 L 0.9,227.9 L -0.4,225.4 L -1.8,223.9 L -4.1,222.6 L -7.7,220.9 L -12.9,218.2 L -17.4,216.3 L -20.4,215.8 L -25.8,216.4 L -30.6,217.0 L -35.4,217.7 L -40.0,219.3 L -43.4,221.8 L -48.1,227.0 L -50.3,227.9 L -53.1,229.0 L -58.2,229.9 L -66.5,231.9 L -71.8,232.3 L -74.2,232.3 L -79.9,232.3 L -82.6,231.3 L -84.9,230.3 L -86.4,229.1 L -87.5,227.5 L -88.5,224.7 L -91.0,223.1 L -94.8,221.6 L 0,0 L 0,500 Z" fill="#1e293b" stroke="#334155" stroke-width="1.5" />
+              <path d="M 455.5,836.8 L 454.3,835.9 L 452.4,833.8 L 451.3,832.8 L 449.9,832.1 L 448.5,831.4 L 446.4,829.8 L 444.4,828.0 L 442.6,826.1 L 440.8,824.1 L 438.5,821.2 L 436.5,818.3 L 435.5,816.7 L 434.7,814.9 L 434.0,812.9 L 433.6,810.8 L 433.3,808.5 L 433.2,805.9 L 433.3,804.7 L 433.3,804.0 L 433.7,802.3 L 434.1,800.7 L 434.6,799.1 L 435.1,797.5 L 435.8,796.2 L 436.5,794.9 L 437.4,793.3 L 438.9,791.3 L 440.7,789.1 L 442.2,787.1 L 443.3,785.0 L 444.7,782.5 L 445.9,780.4 L 446.7,779.1 L 447.4,778.3 L 448.1,777.4 L 448.7,776.6 L 451.6,772.5 L 452.7,770.7 L 454.4,767.8 L 456.1,765.5 L 458.1,762.7 L 459.8,760.1 L 461.6,757.0 L 464.5,752.7 L 466.9,748.9 L 468.6,745.8 L 469.6,743.5 L 471.2,740.9 L 471.8,739.2 L 472.8,736.5 L 473.9,732.9 L 475.6,728.9 L 477.7,724.6 L 479.8,719.9 L 481.4,716.9 L 483.5,714.0 L 485.1,711.8 L 487.0,709.7 L 488.1,708.7 L 489.2,707.6 L 490.4,706.1 L 491.8,704.5 L 494.1,700.8 L 493.6,698.2 L 491.9,696.4 L 490.5,695.4 L 489.1,694.4 L 487.7,693.4 L 486.2,691.8 L 485.4,690.8 L 484.1,688.7 L 482.3,686.8 L 480.1,684.6 L 478.3,682.9 L 475.3,680.9 L 472.1,679.3 L 469.0,677.9 L 466.7,676.3 L 464.8,674.4 L 462.9,672.5 L 460.9,671.2 L 457.7,669.4 L 454.9,667.7 L 451.1,665.4 L 447.9,663.4 L 445.1,661.8 L 442.6,659.9 L 440.9,658.3 L 439.7,656.7 L 437.3,655.2 L 434.4,652.7 L 429.0,642.3 L 428.0,638.5 L 427.3,635.2 L 426.7,631.6 L 426.0,628.3 L 425.4,625.5 L 425.0,624.0 L 424.5,622.7 L 423.9,621.6 L 423.4,620.6 L 422.0,618.2 L 421.1,616.3 L 420.0,614.4 L 419.0,612.5 L 417.1,609.0 L 415.2,604.9 L 413.2,601.2 L 410.9,598.0 L 409.1,595.7 L 406.7,593.6 L 404.1,591.7 L 401.2,589.1 L 397.3,586.6 L 394.6,584.3 L 391.8,581.7 L 389.4,579.1 L 386.6,577.5 L 385.1,576.5 L 383.8,575.8 L 382.0,574.7 L 379.7,572.8 L 378.2,571.8 L 377.4,571.4 L 375.7,570.0 L 374.5,569.1 L 373.7,568.2 L 372.7,567.4 L 370.6,565.2 L 368.6,561.9 L 367.0,560.1 L 365.2,558.3 L 359.5,552.8 L 357.9,550.9 L 355.2,547.8 L 354.0,546.3 L 352.0,544.1 L 350.7,542.2 L 349.6,540.8 L 347.4,538.0 L 344.9,534.2 L 343.2,531.8 L 341.9,529.5 L 340.9,527.4 L 340.2,525.1 L 339.7,523.6 L 339.4,521.9 L 339.1,520.0 L 339.1,518.0 L 339.3,515.8 L 340.1,511.6 L 341.2,505.4 L 341.9,501.8 L 342.5,499.1 L 343.0,496.9 L 345.0,491.3 L 345.7,488.9 L 346.0,487.1 L 346.0,485.1 L 345.7,483.2 L 344.9,479.7 L 344.0,477.2 L 342.4,471.0 L 341.2,464.6 L 341.2,459.4 L 341.6,458.6 L 342.2,453.2 L 342.8,452.9 L 343.2,450.4 L 343.9,449.0 L 344.1,447.8 L 343.6,446.8 L 343.4,446.2 L 344.6,443.3 L 344.6,443.3 L 346.0,439.8 L 350.3,433.5 L 351.8,431.7 L 351.8,431.7 L 355.2,427.6 L 359.4,422.7 L 364.4,417.2 L 368.9,413.0 L 371.8,410.2 L 379.1,404.4 L 382.5,401.7 L 386.3,398.7 L 388.5,396.9 L 390.5,394.9 L 390.9,394.1 L 390.9,393.3 L 390.5,392.5 L 389.3,391.1 L 388.0,389.9 L 387.8,388.9 L 388.1,388.0 L 387.2,386.6 L 385.1,383.8 L 382.2,380.9 L 380.7,379.8 L 377.1,377.8 L 371.3,374.7 L 365.0,371.3 L 365.0,370.6 L 364.2,370.0 L 364.0,369.5 L 360.2,367.1 L 355.6,364.9 L 354.8,364.9 L 352.6,363.7 L 346.3,360.6 L 346.1,360.2 L 342.4,358.4 L 341.0,357.8 L 337.9,355.9 L 333.9,353.7 L 333.9,353.4 L 331.2,352.1 L 329.9,351.4 L 327.4,349.9 L 326.2,348.8 L 322.1,345.5 L 320.0,343.8 L 319.5,343.9 L 319.3,344.0 L 319.2,344.0 L 318.0,344.2 L 316.8,343.8 L 316.6,344.1 L 313.5,342.2 L 312.9,342.6 L 309.6,341.1 L 304.9,338.6 L 303.3,337.1 L 300.8,335.6 L 298.1,334.3 L 292.8,332.1 L 288.1,331.1 L 285.0,330.0 L 282.0,328.3 L 282.3,327.2 L 277.2,326.0 L 277.1,325.7 L 270.2,324.2 L 266.5,324.0 L 262.4,323.5 L 262.4,323.5 L 259.4,325.1 L 257.0,326.9 L 254.1,328.8 L 251.9,330.5 L 250.1,331.7 L 248.9,332.8 L 248.5,333.6 L 248.5,333.6 L 248.6,334.9 L 249.4,337.0 L 249.1,338.3 L 249.2,339.4 L 249.7,340.2 L 250.7,341.3 L 251.6,343.2 L 252.3,344.8 L 252.8,347.1 L 252.4,347.9 L 252.7,352.0 L 253.1,352.5 L 253.4,357.1 L 253.1,361.5 L 252.3,368.2 L 251.6,370.9 L 252.3,373.0 L 251.2,375.8 L 249.2,378.8 L 248.2,379.5 L 247.4,382.3 L 244.9,388.3 L 245.3,397.9 L 244.2,403.7 L 245.1,409.6 L 244.3,413.4 L 243.2,415.7 L 243.0,418.4 L 242.5,422.1 L 242.2,425.3 L 241.9,428.9 L 241.9,430.2 L 241.6,433.1 L 240.9,437.4 L 239.0,446.7 L 237.7,453.7 L 236.9,458.1 L 236.7,462.5 L 235.3,468.5 L 234.0,472.0 L 233.9,476.1 L 234.0,476.7 L 234.5,476.6 L 235.6,480.6 L 235.7,483.3 L 236.0,486.8 L 235.6,490.4 L 234.5,493.4 L 232.6,494.6 L 231.9,495.3 L 231.3,496.8 L 231.6,498.8 L 232.3,501.6 L 232.1,504.8 L 231.8,507.1 L 230.2,510.0 L 230.0,510.7 L 229.4,511.2 L 228.5,516.3 L 228.3,522.1 L 228.6,533.2 L 228.2,539.1 L 228,500 L 455,500 Z" fill="#1e293b" stroke="#334155" stroke-width="1.5" />
+              <path d="M 680.7,-54.7 L 681.0,-53.3 L 682.3,-50.6 L 682.9,-50.6 L 684.3,-46.9 L 684.6,-46.9 L 685.3,-45.3 L 685.8,-43.4 L 686.2,-41.5 L 686.3,-39.5 L 686.5,-37.3 L 686.2,-34.6 L 686.3,-33.6 L 686.4,-33.2 L 690.3,-27.6 L 690.6,-25.5 L 691.0,-25.4 L 691.2,-23.7 L 691.6,-22.3 L 691.8,-21.1 L 692.1,-20.1 L 692.2,-17.9 L 692.3,-17.3 L 692.8,-16.7 L 693.2,-15.2 L 693.1,-12.4 L 693.0,-9.7 L 693.9,-7.9 L 694.3,-7.9 L 695.1,-5.6 L 695.5,-3.7 L 695.3,0.9 L 694.9,0.8 L 694.9,2.5 L 695.5,2.5 L 695.5,6.1 L 695.0,6.1 L 694.9,9.9 L 694.7,9.9 L 694.7,10.9 L 694.2,11.0 L 693.9,13.7 L 693.3,16.2 L 692.4,19.1 L 691.9,20.9 L 691.4,21.7 L 691.0,22.6 L 690.7,24.0 L 690.0,25.7 L 689.4,27.8 L 689.2,28.8 L 688.9,29.9 L 688.6,31.2 L 688.6,33.2 L 688.8,33.9 L 689.7,36.0 L 690.6,38.0 L 691.2,40.1 L 693.2,45.1 L 693.1,46.0 L 693.8,46.8 L 695.3,49.5 L 697.1,54.1 L 697.6,55.6 L 698.4,56.8 L 701.6,63.6 L 702.1,67.1 L 702.5,71.6 L 702.4,73.2 L 701.9,74.9 L 701.5,76.4 L 700.9,78.6 L 700.4,80.1 L 700.3,81.0 L 700.2,81.2 L 700.1,81.8 L 699.6,82.1 L 699.2,82.9 L 699.0,83.9 L 699.0,85.1 L 699.0,85.4 L 699.2,86.1 L 699.7,86.8 L 700.3,87.5 L 701.9,88.5 L 702.6,89.1 L 703.7,90.5 L 704.3,91.4 L 704.3,93.0 L 704.3,95.7 L 704.0,99.7 L 704.3,102.6 L 705.9,107.1 L 706.6,109.1 L 707.7,111.7 L 708.3,113.5 L 708.7,115.5 L 709.0,117.7 L 709.0,119.9 L 708.5,122.6 L 707.3,126.1 L 705.8,129.5 L 704.3,131.9 L 701.0,136.4 L 699.0,138.9 L 697.1,141.2 L 695.0,143.4 L 691.7,146.8 L 687.2,151.2 L 682.2,155.7 L 679.2,158.6 L 677.8,160.4 L 677.4,161.3 L 677.1,162.1 L 676.9,163.8 L 676.9,163.8 L 677.1,164.6 L 677.4,166.2 L 678.4,168.4 L 680.0,170.3 L 683.1,172.9 L 690.0,177.8 L 695.0,181.7 L 701.7,187.0 L 706.1,191.0 L 711.5,196.3 L 715.9,201.6 L 717.6,204.7 L 718.6,207.1 L 719.2,209.7 L 719.6,212.9 L 719.5,216.3 L 718.8,220.7 L 718.4,222.2 L 718.3,222.4 L 718.2,224.3 L 718.3,225.7 L 718.3,226.9 L 718.3,228.8 L 718.3,232.7 L 718.0,237.6 L 717.2,240.5 L 716.0,243.6 L 714.0,247.0 L 710.5,251.2 L 707.1,255.4 L 705.8,257.0 L 703.2,260.0 L 701.5,261.7 L 700.2,262.9 L 698.5,264.6 L 698.5,264.6 L 694.1,268.7 L 692.0,270.4 L 691.3,271.4 L 690.7,273.3 L 690.7,273.3 L 691.1,275.2 L 692.6,276.6 L 694.4,278.1 L 697.2,279.2 L 699.3,281.4 L 702.2,284.4 L 704.6,287.6 L 705.2,289.1 L 705.3,289.3 L 705.6,289.9 L 707.5,294.1 L 708.8,298.8 L 710.1,301.5 L 712.1,305.4 L 712.6,308.3 L 715.5,317.5 L 716.3,321.5 L 717.5,324.0 L 717.6,324.1 L 719.1,327.0 L 722.4,329.2 L 725.9,335.5 L 726.7,338.1 L 728.4,341.1 L 731.3,344.4 L 734.6,351.7 L 736.4,353.9 L 740.2,361.0 L 741.5,362.5 L 744.9,367.2 L 746.8,370.5 L 748.8,374.4 L 750.0,376.7 L 751.7,378.8 L 751.9,379.0 L 753.7,381.5 L 756.2,385.3 L 758.1,390.6 L 759.6,394.3 L 760.5,395.8 L 761.5,397.5 L 764.3,399.5 L 769.7,402.3 L 772.5,404.8 L 776.8,407.0 L 779.0,409.1 L 779.4,409.6 L 781.1,411.3 L 785.4,413.8 L 787.9,415.4 L 791.9,417.8 L 794.9,419.3 L 798.3,422.1 L 802.6,424.9 L 805.8,427.5 L 809.2,430.9 L 811.6,434.1 L 813.4,436.9 L 816.1,438.7 L 819.5,440.6 L 820.4,443.0 L 820.7,446.0 L 821.9,449.2 L 822.6,449.8 L 823.4,450.4 L 827.2,451.0 L 832.0,454.0 L 834.1,456.1 L 840.1,460.3 L 849.1,465.8 L 854.2,469.5 L 857.3,471.2 L 859.5,472.8 L 861.7,474.9 L 864.7,477.7 L 866.3,480.5 L 869.2,483.6 L 871.3,485.7 L 872.9,487.6 L 800,500 L 800,0 Z" fill="#1e293b" stroke="#334155" stroke-width="1.5" />
+              <path d="M 221.6,65.7 L 221.4,66.1 L 221.2,66.6 L 221.1,67.1 L 220.8,67.7 L 220.6,68.0 L 220.2,68.2 L 219.5,68.5 L 219.0,68.4 L 218.5,68.3 L 218.0,68.1 L 216.3,67.0 L 207.4,61.2 L 206.7,60.7 L 205.0,60.1 L 202.8,59.4 L 201.6,58.7 L 197.6,57.2 L 193.9,55.6 L 184.5,51.1 L 180.6,48.4 L 173.7,45.2 L 170.6,43.9 L 167.2,42.9 L 159.9,40.5 L 154.9,39.5 L 151.7,39.1 L 144.6,38.9 L 140.1,38.9 L 133.1,40.4 L 130.7,40.7 L 127.2,41.0 L 121.2,42.1 L 116.8,42.6 L 111.5,42.5 L 107.7,44.3 L 101.4,45.1 L 92.8,45.0 L 86.8,43.5 L 84.5,43.4 L 83.1,43.3 L 81.8,43.7 L 81.0,44.5 L 80.4,45.8 L 80.8,47.2 L 81.8,48.8 L 83.7,52.6 L 86.3,56.3 L 89.6,61.0 L 91.3,63.4 L 93.5,66.0 L 95.2,68.6 L 98.5,74.1 L 100.9,78.8 L 102.9,82.3 L 104.1,85.2 L 105.9,89.2 L 107.2,92.8 L 108.2,96.0 L 109.5,98.8 L 110.3,101.3 L 111.0,103.6 L 112.0,105.5 L 114.6,109.7 L 116.4,111.4 L 118.0,112.9 L 119.3,114.6 L 120.4,117.3 L 120.9,120.6 L 121.4,125.6 L 121.9,131.8 L 122.2,134.8 L 122.9,138.5 L 125.6,143.6 L 127.4,145.5 L 129.3,147.4 L 130.5,148.4 L 132.0,149.4 L 132.7,150.0 L 136.1,151.8 L 138.0,152.9 L 139.5,154.1 L 141.0,155.1 L 142.8,155.8 L 145.3,156.7 L 147.8,157.6 L 151.3,158.8 L 155.2,160.2 L 159.3,161.9 L 164.4,163.7 L 167.5,164.5 L 171.0,165.8 L 173.3,167.8 L 175.3,169.3 L 177.7,169.8 L 180.6,169.3 L 183.4,168.8 L 187.5,167.5 L 192.3,166.4 L 195.9,165.9 L 198.7,165.3 L 201.3,163.7 L 202.5,161.8 L 203.1,159.8 L 203.1,157.3 L 202.7,154.1 L 201.1,149.7 L 199.4,145.0 L 197.5,141.1 L 196.2,134.8 L 194.6,131.1 L 193.0,128.2 L 192.2,125.7 L 191.9,123.4 L 191.9,120.7 L 192.1,118.0 L 192.6,114.7 L 194.0,110.7 L 195.2,107.4 L 197.1,103.9 L 199.3,100.9 L 200.5,99.4 L 201.6,97.9 L 203.5,95.2 L 205.4,92.1 L 207.7,89.6 L 209.2,88.3 L 210.9,86.9 L 212.8,85.4 L 214.8,84.0 L 222.0,80.0 L 223.2,79.4 L 224.1,78.2 L 224.5,77.1 L 224.9,75.3 L 225.2,72.7 L 224.9,71.1 L 224.5,70.1 L 224.0,69.1 L 223.4,67.9 L 223.0,66.9 L 223.1,66.2 L 221.6,65.7 Z" fill="#1e293b" stroke="#334155" stroke-width="1.5" />
+            </g>
+
+            <!-- Geographic Labels -->
+            <g id="labels-layer" font-family="sans-serif" font-size="11" font-weight="600" fill="#64748b">
+              <text x="730" y="80" text-anchor="middle">WEST SEATTLE</text>
+              <text x="340" y="420" text-anchor="middle">VASHON ISLAND</text>
+              <text x="70" y="200" text-anchor="middle">KITSAP</text>
+              <text x="220" y="80" text-anchor="middle" font-size="9" fill="#475569">Blake Island</text>
+              <text x="530" y="250" text-anchor="middle" font-size="10" fill="#1e3a8a" font-style="italic">Puget Sound</text>
+            </g>
+
+            <!-- Nautical Navigation Channels -->
+            <g id="channels-layer" stroke="#1e3a8a" stroke-width="1.5" stroke-dasharray="4, 6" opacity="0.7">
+              <line x1="700" y1="223.3" x2="325.7" y2="325" />
+              <line x1="325.7" y1="325" x2="137.1" y2="308.3" />
+              <line x1="137.1" y1="308.3" x2="700" y2="223.3" />
+            </g>
+
+            <!-- Terminal Docks (Clean subtle dots, no permanent text boxes) -->
+            <g id="docks-layer">
+              <!-- Fauntleroy Dock -->
+              <circle cx="700" cy="223.3" r="10" fill="#0284c7" opacity="0.2" class="dock-beacon" />
+              <circle cx="700" cy="223.3" r="4.5" fill="#38bdf8" stroke="#0284c7" stroke-width="1.5" />
+              <!-- Vashon North Dock -->
+              <circle cx="325.7" cy="325" r="10" fill="#0284c7" opacity="0.2" class="dock-beacon" />
+              <circle cx="325.7" cy="325" r="4.5" fill="#38bdf8" stroke="#0284c7" stroke-width="1.5" />
+              <!-- Southworth Dock -->
+              <circle cx="137.1" cy="308.3" r="10" fill="#0284c7" opacity="0.2" class="dock-beacon" />
+              <circle cx="137.1" cy="308.3" r="4.5" fill="#38bdf8" stroke="#0284c7" stroke-width="1.5" />
+            </g>
+
+            <!-- Wake Trails Dynamic Layer -->
+            <g id="wake-trails-layer"></g>
+
+            <!-- Dynamic Live Moving Vessels Layer -->
+            <g id="vessels-svg-layer"></g>
+          </svg>
+        </div>
 
         <div class="mt-3 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
           <div class="flex items-center gap-4">
             <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"></span> Moving Underway</span>
             <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-sky-400 inline-block"></span> Loading At Dock</span>
-            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block"></span> Terminal</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block"></span> Terminal Slip</span>
           </div>
           <span id="vessel-telemetry-status">3 vessels tracking in real-time</span>
         </div>
@@ -304,7 +361,7 @@
 
   <!-- FOOTER -->
   <footer class="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
-    Automated AWS S3 + Lambda ferry tracking feed • Live dead-reckoning animation • Data refreshed from WSDOT
+    Automated AWS S3 + Lambda ferry tracking feed • Native SVG vector radar • Data refreshed from WSDOT
   </footer>
 
   <!-- EMBEDDED INITIAL STATE -->
@@ -316,8 +373,23 @@
   <script>
     let currentData = window.__INITIAL_DATA__ || {};
     let activeDirection = 'AM';
-    let mapInstance = null;
     
+    // SVG Geographic Coordinates Projection (800x500 box)
+    const SVG_BOUNDS = {
+      minLon: -122.520,
+      maxLon: -122.380,
+      minLat: 47.490,
+      maxLat: 47.550,
+      width: 800,
+      height: 500
+    };
+
+    function projectGeoToSvg(lat, lon) {
+      const x = ((lon - SVG_BOUNDS.minLon) / (SVG_BOUNDS.maxLon - SVG_BOUNDS.minLon)) * SVG_BOUNDS.width;
+      const y = ((SVG_BOUNDS.maxLat - lat) / (SVG_BOUNDS.maxLat - SVG_BOUNDS.minLat)) * SVG_BOUNDS.height;
+      return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+    }
+
     // Live Vessel Tracking & Motion State
     let vesselMotionStates = {};
     let animationTimer = null;
@@ -325,12 +397,11 @@
     function init() {
       lucide.createIcons();
       initClock();
-      initMap();
       renderActiveView();
       
-      // Real-time animation loop: updates live moving vessels every 1000ms
+      // Native SVG Dead-Reckoning Loop (ticks every 1000ms)
       if (!animationTimer) {
-        animationTimer = setInterval(tickVesselDeadReckoning, 1000);
+        animationTimer = setInterval(tickSvgDeadReckoning, 1000);
       }
 
       // Poll data.json every 30s to calibrate GPS fixes
@@ -369,7 +440,7 @@
       renderVesselsList();
       renderBulletins();
       renderFullTimetable();
-      syncVesselTelemetryToMap();
+      syncVesselTelemetryToSvg();
       lucide.createIcons();
     }
 
@@ -456,7 +527,9 @@
       const rawBriefing = currentData.executive_briefing || 'Analyzing ferry telemetry and school bus schedules...';
       
       const formatted = rawBriefing
-        .split('\n\n')
+        .split('
+
+')
         .map(p => `<p class="leading-relaxed">${p.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')}</p>`)
         .join('');
       container.innerHTML = formatted;
@@ -655,173 +728,126 @@
       `).join('');
     }
 
-    function initMap() {
-      mapInstance = L.map('vessel-map', {
-        center: [47.518, -122.445],
-        zoom: 12,
-        zoomControl: true,
-        attributionControl: false
-      });
-
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 18,
-      }).addTo(mapInstance);
-
-      // Terminal markers
-      const terminals = [
-        { name: 'Fauntleroy Dock', lat: 47.5232, lon: -122.3975, side: 'Seattle' },
-        { name: 'Vashon North Dock', lat: 47.5110, lon: -122.4630, side: 'Vashon' },
-        { name: 'Southworth Dock', lat: 47.5130, lon: -122.4960, side: 'Kitsap' }
-      ];
-
-      terminals.forEach(t => {
-        L.circleMarker([t.lat, t.lon], {
-          radius: 6,
-          color: '#38bdf8',
-          fillColor: '#0284c7',
-          fillOpacity: 0.8,
-          weight: 2
-        }).addTo(mapInstance).bindTooltip(`<strong>${t.name}</strong>`, {
-          permanent: false,
-          direction: 'top',
-          className: 'bg-slate-900 text-slate-200 text-xs border border-slate-700 font-sans'
-        });
-      });
-
-      // Nautical Sailing Channels (dotted guide paths)
-      const fToVashon = [[47.5232, -122.3975], [47.5110, -122.4630]];
-      const vashonToSouthworth = [[47.5110, -122.4630], [47.5130, -122.4960]];
-      const fauntToSouthworth = [[47.5232, -122.3975], [47.5130, -122.4960]];
-
-      [fToVashon, vashonToSouthworth, fauntToSouthworth].forEach(path => {
-        L.polyline(path, {
-          color: '#334155',
-          weight: 1.5,
-          dashArray: '3, 6',
-          opacity: 0.7
-        }).addTo(mapInstance);
-      });
-    }
-
-    function createFerryIcon(vessel) {
-      const heading = vessel.heading || 0;
-      const isAtDock = vessel.at_dock;
-      const color = isAtDock ? '#38bdf8' : '#10b981';
-      const speed = vessel.speed_knots || 0;
-
-      const html = `
-        <div style="position:relative; width:48px; height:48px; display:flex; align-items:center; justify-content:center;">
-          <!-- Moving Arrow Vessel Icon -->
-          <svg width="28" height="28" viewBox="0 0 24 24" class="ferry-marker-icon" style="transform: rotate(${heading}deg); transform-origin: 50% 50%;">
-            <path d="M12 2 L20 20 L12 16 L4 20 Z" fill="${color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round" />
-          </svg>
-          <!-- Vessel Label badge -->
-          <div style="position:absolute; top:28px; left:50%; transform:translateX(-50%); white-space:nowrap; font-size:10px; font-weight:700; color:#fff; background:rgba(15,23,42,0.9); padding:1px 5px; border-radius:4px; border:1px solid #334155; pointer-events:none; box-shadow:0 2px 4px rgba(0,0,0,0.5);">
-            ${vessel.name} ${speed > 0 ? '(' + speed + 'k)' : ''}
-          </div>
-        </div>
-      `;
-
-      return L.divIcon({
-        html: html,
-        className: 'custom-ferry-div',
-        iconSize: [48, 48],
-        iconAnchor: [24, 24]
-      });
-    }
-
-    function syncVesselTelemetryToMap() {
-      if (!mapInstance) return;
+    // NATIVE SVG VESSEL MOTION & RENDERING
+    function syncVesselTelemetryToSvg() {
       const vessels = currentData.vessels_telemetry || [];
+      const svgLayer = document.getElementById('vessels-svg-layer');
+      const wakeLayer = document.getElementById('wake-trails-layer');
 
       vessels.forEach(v => {
         if (!v.latitude || !v.longitude || !v.name) return;
 
         const key = v.name;
-        const state = vesselMotionStates[key];
+        const pt = projectGeoToSvg(v.latitude, v.longitude);
+        const heading = v.heading || 0;
+        const speed = v.speed_knots || 0;
+        const atDock = v.at_dock;
 
+        let state = vesselMotionStates[key];
         if (!state) {
-          // Initialize marker
-          const marker = L.marker([v.latitude, v.longitude], {
-            icon: createFerryIcon(v)
-          }).addTo(mapInstance);
+          // Create SVG element for this vessel
+          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          g.setAttribute('id', 'vessel-g-' + key.toLowerCase());
+          g.setAttribute('class', 'vessel-group cursor-pointer');
 
-          marker.bindTooltip(`
-            <strong>${v.name}</strong><br>
-            Speed: <b>${v.speed_knots} kts</b> • Heading: <b>${v.heading}°</b><br>
-            Route: ${v.departing_terminal || 'Dock'} → ${v.arriving_terminal || 'Dock'}<br>
-            Status: ${v.at_dock ? 'At Dock (Loading)' : 'Underway'}
-          `, { direction: 'top', className: 'bg-slate-900 text-slate-100 text-xs border border-slate-700' });
+          // Wake line
+          const wake = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+          wake.setAttribute('id', 'wake-' + key.toLowerCase());
+          wake.setAttribute('stroke', '#34d399');
+          wake.setAttribute('stroke-width', '2');
+          wake.setAttribute('opacity', '0.6');
+          wake.setAttribute('class', 'wake-trail');
+          wakeLayer.appendChild(wake);
 
-          // Wake polyline
-          const wakeLine = L.polyline([[v.latitude, v.longitude]], {
-            color: '#34d399',
-            weight: 2,
-            opacity: 0.6,
-            className: 'wake-trail'
-          }).addTo(mapInstance);
+          svgLayer.appendChild(g);
 
-          vesselMotionStates[key] = {
+          state = {
             name: v.name,
             currentLat: v.latitude,
             currentLon: v.longitude,
-            speedKnots: v.speed_knots || 0,
-            heading: v.heading || 0,
-            atDock: v.at_dock,
-            marker: marker,
-            wakeLine: wakeLine,
-            trailCoords: [[v.latitude, v.longitude]]
+            x: pt.x,
+            y: pt.y,
+            speedKnots: speed,
+            heading: heading,
+            atDock: atDock,
+            groupEl: g,
+            wakeEl: wake,
+            trailPts: [[pt.x, pt.y]]
           };
+          vesselMotionStates[key] = state;
         } else {
-          // Update telemetry calibration
+          // Calibrate to newly polled GPS coordinate
           state.currentLat = v.latitude;
           state.currentLon = v.longitude;
-          state.speedKnots = v.speed_knots || 0;
-          state.heading = v.heading || 0;
-          state.atDock = v.at_dock;
-          state.marker.setLatLng([v.latitude, v.longitude]);
-          state.marker.setIcon(createFerryIcon(v));
+          state.x = pt.x;
+          state.y = pt.y;
+          state.speedKnots = speed;
+          state.heading = heading;
+          state.atDock = atDock;
 
-          // Keep up to 10 trail points
-          state.trailCoords.push([v.latitude, v.longitude]);
-          if (state.trailCoords.length > 10) state.trailCoords.shift();
-          state.wakeLine.setLatLngs(state.trailCoords);
+          state.trailPts.push([pt.x, pt.y]);
+          if (state.trailPts.length > 15) state.trailPts.shift();
         }
+
+        renderSingleVesselSvg(state);
       });
     }
 
-    // Dead Reckoning Math (Runs every 1 second in JavaScript)
-    function tickVesselDeadReckoning() {
-      if (!mapInstance) return;
+    function renderSingleVesselSvg(state) {
+      const g = state.groupEl;
+      const color = state.atDock ? '#38bdf8' : '#10b981';
+      const heading = state.heading;
 
+      // Position the vessel group
+      g.setAttribute('transform', `translate(${state.x}, ${state.y})`);
+
+      g.innerHTML = `
+        <!-- Directional Boat Marker (Arrow points North 0 deg, rotated by heading) -->
+        <g transform="rotate(${heading})">
+          <path d="M 0 -12 L 8 10 L 0 6 L -8 10 Z" fill="${color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round" filter="drop-shadow(0 2px 4px rgba(0,0,0,0.8))" />
+        </g>
+        
+        <!-- Label Pill -->
+        <g transform="translate(0, 16)">
+          <rect x="-40" y="0" width="80" height="15" rx="4" fill="#0f172a" fill-opacity="0.9" stroke="#334155" stroke-width="0.8" />
+          <text x="0" y="11" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="bold" fill="#ffffff">
+            ${state.name} ${state.speedKnots > 0 ? state.speedKnots + 'k' : ''}
+          </text>
+        </g>
+      `;
+
+      // Update wake trail
+      if (state.wakeEl && state.trailPts) {
+        state.wakeEl.setAttribute('points', state.trailPts.map(p => p[0] + ',' + p[1]).join(' '));
+        state.wakeEl.setAttribute('display', state.atDock ? 'none' : 'block');
+      }
+    }
+
+    // Real-Time Dead Reckoning Engine (Ticks every 1 second)
+    function tickSvgDeadReckoning() {
       Object.values(vesselMotionStates).forEach(state => {
-        if (state.atDock || state.speedKnots < 0.5) {
-          // Boat is at dock or stationary; no dead reckoning needed
-          return;
-        }
+        if (state.atDock || state.speedKnots < 0.5) return;
 
-        // AIS nautical motion projection:
         // 1 knot = 0.514444 meters / second
         const metersPerSec = state.speedKnots * 0.514444;
         const rad = (state.heading * Math.PI) / 180.0;
 
-        // 1 deg latitude ~ 111,139 meters
         const deltaLat = (metersPerSec * Math.cos(rad)) / 111139.0;
-
-        // 1 deg longitude ~ 111,139 * cos(lat)
         const latRad = (state.currentLat * Math.PI) / 180.0;
         const deltaLon = (metersPerSec * Math.sin(rad)) / (111139.0 * Math.cos(latRad));
 
         state.currentLat += deltaLat;
         state.currentLon += deltaLon;
 
-        // Smoothly step the marker position
-        state.marker.setLatLng([state.currentLat, state.currentLon]);
+        // Update projected SVG coordinates
+        const pt = projectGeoToSvg(state.currentLat, state.currentLon);
+        state.x = pt.x;
+        state.y = pt.y;
 
-        // Append to wake trail
-        state.trailCoords.push([state.currentLat, state.currentLon]);
-        if (state.trailCoords.length > 12) state.trailCoords.shift();
-        state.wakeLine.setLatLngs(state.trailCoords);
+        state.trailPts.push([pt.x, pt.y]);
+        if (state.trailPts.length > 15) state.trailPts.shift();
+
+        renderSingleVesselSvg(state);
       });
     }
 
