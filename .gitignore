@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+lambda_package.zip
+.aws-sam/
