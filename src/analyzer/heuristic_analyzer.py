@@ -116,7 +116,8 @@ def evaluate_commute(
     )
     
     return {
-        "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "timestamp": now.isoformat(),
+        "timestamp_epoch": now.timestamp(),
         "current_time_display": now.strftime("%A, %b %d at %I:%M %p"),
         "is_weekend": is_weekend,
         "current_weekday_name": now.strftime("%A"),

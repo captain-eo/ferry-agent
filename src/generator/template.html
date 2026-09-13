@@ -88,12 +88,17 @@
       </div>
 
       <div class="flex items-center gap-3 text-xs sm:text-sm">
-        <div class="hidden sm:block text-right">
-          <div id="clock-display" class="font-mono text-slate-200 font-medium">--:--:-- --</div>
-          <div id="updated-display" class="text-slate-400 text-xs">Updated just now</div>
+        <div class="text-right">
+          <div id="clock-display" class="hidden sm:block font-mono text-slate-200 font-medium">--:--:-- --</div>
+          <div id="updated-display" class="text-slate-400 text-xs font-medium">Checking updates...</div>
         </div>
-        <button id="refresh-btn" onclick="fetchLiveUpdates()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
-          <i data-lucide="refresh-cw" id="refresh-icon" class="w-3.5 h-3.5"></i>
+        <button id="refresh-btn" onclick="fetchLiveUpdates()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition disabled:opacity-50">
+          <svg id="refresh-icon" class="w-3.5 h-3.5 text-slate-300 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+            <path d="M8 16H3v5" />
+          </svg>
           <span>Refresh</span>
         </button>
       </div>
@@ -397,6 +402,7 @@
     function init() {
       lucide.createIcons();
       initClock();
+      updateTimeAgo();
       renderActiveView();
       
       // Native SVG Dead-Reckoning Loop (ticks every 1000ms)
@@ -411,8 +417,11 @@
     function initClock() {
       function update() {
         const now = new Date();
-        const str = now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles' });
-        document.getElementById('clock-display').innerText = str + ' PT';
+        const clockEl = document.getElementById('clock-display');
+        if (clockEl) {
+          clockEl.innerText = now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles' }) + ' PT';
+        }
+        updateTimeAgo();
       }
       update();
       setInterval(update, 1000);
@@ -849,21 +858,61 @@
       });
     }
 
+    function updateTimeAgo() {
+      const el = document.getElementById('updated-display');
+      if (!el || !currentData) return;
+
+      let dataTime = null;
+      if (currentData.timestamp_epoch) {
+        dataTime = currentData.timestamp_epoch * 1000;
+      } else if (currentData.timestamp) {
+        let ts = currentData.timestamp;
+        if (ts.length === 24 && (ts.endsWith('-0700') || ts.endsWith('-0800'))) {
+          ts = ts.slice(0, 22) + ':' + ts.slice(22);
+        }
+        dataTime = Date.parse(ts);
+      }
+
+      if (!dataTime || isNaN(dataTime)) {
+        el.innerText = 'Updated ' + (currentData.current_time_display || 'recently');
+        return;
+      }
+
+      const diffSec = Math.max(0, Math.floor((Date.now() - dataTime) / 1000));
+      const diffMin = Math.floor(diffSec / 60);
+
+      if (diffSec < 45) {
+        el.innerText = 'Updated just now';
+      } else if (diffMin < 60) {
+        el.innerText = `Updated ${diffMin}m ago`;
+      } else {
+        const diffHours = Math.floor(diffMin / 60);
+        const remMin = diffMin % 60;
+        el.innerText = remMin > 0 ? `Updated ${diffHours}h ${remMin}m ago` : `Updated ${diffHours}h ago`;
+      }
+    }
+
     async function fetchLiveUpdates() {
       const icon = document.getElementById('refresh-icon');
-      icon.classList.add('animate-spin');
+      const btn = document.getElementById('refresh-btn');
+      if (icon) icon.classList.add('animate-spin');
+      if (btn) btn.setAttribute('disabled', 'true');
+
       try {
         const res = await fetch('data.json?t=' + Date.now());
         if (res.ok) {
           const freshData = await res.json();
           currentData = freshData;
-          document.getElementById('updated-display').innerText = 'Updated just now';
           renderActiveView();
+          updateTimeAgo();
         }
       } catch (err) {
         console.warn('Live fetch failed; using cached telemetry.', err);
       } finally {
-        setTimeout(() => icon.classList.remove('animate-spin'), 600);
+        setTimeout(() => {
+          if (icon) icon.classList.remove('animate-spin');
+          if (btn) btn.removeAttribute('disabled');
+        }, 500);
       }
     }
 
