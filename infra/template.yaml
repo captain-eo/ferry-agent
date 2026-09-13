@@ -1,8 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
 Description: >
-  Fauntleroy to Vashon School Commute Ferry Tracker
-  Automated Lambda updating an S3 static site using WSDOT feeds and Gemini Flash.
+  Fauntleroy to Vashon School Commute Ferry Tracker.
+  Automated Lambda function updating an S3 static site using WSDOT feeds and Gemini Flash.
 
 Parameters:
   GeminiApiKey:
@@ -17,7 +16,7 @@ Parameters:
   ScheduleCron:
     Type: String
     Default: "rate(4 minutes)"
-    Description: EventBridge invocation schedule.
+    Description: EventBridge invocation schedule (e.g. rate(4 minutes)).
 
 Resources:
   # S3 Bucket for Static Website Hosting
@@ -48,38 +47,87 @@ Resources:
             Action: 's3:GetObject'
             Resource: !Sub "${FerryWebsiteBucket.Arn}/*"
 
+  # IAM Execution Role for Lambda Function
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "vashon-ferry-tracker-role-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3UploadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:PutObjectAcl'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub "${FerryWebsiteBucket.Arn}"
+                  - !Sub "${FerryWebsiteBucket.Arn}/*"
+
   # AWS Lambda Function
   FerryTrackerFunction:
-    Type: AWS::Serverless::Function
+    Type: AWS::Lambda::Function
     Properties:
-      CodeUri: ../
-      Handler: src.lambda_handler.lambda_handler
+      FunctionName: "vashon-ferry-tracker"
+      Description: "Fauntleroy-Vashon school commute ferry tracker and Gemini AI advisor"
       Runtime: python3.12
+      Handler: src.lambda_handler.lambda_handler
       MemorySize: 256
       Timeout: 60
+      Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
           S3_BUCKET_NAME: !Ref FerryWebsiteBucket
           GEMINI_API_KEY: !Ref GeminiApiKey
           GEMINI_MODEL: !Ref GeminiModel
-      Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref FerryWebsiteBucket
-      Events:
-        ScheduledPoll:
-          Type: Schedule
-          Properties:
-            Schedule: !Ref ScheduleCron
-            Name: FerryTrackerCron
-            Description: Triggers ferry telemetry collector and AI analysis every 4 minutes.
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {"statusCode": 200, "body": "Placeholder. Deploy lambda_package.zip to activate."}
+
+  # EventBridge Rule for Periodic Trigger
+  ScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: "vashon-ferry-tracker-cron"
+      Description: "Triggers ferry telemetry collector and AI analysis periodically"
+      ScheduleExpression: !Ref ScheduleCron
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt FerryTrackerFunction.Arn
+          Id: FerryTrackerTarget
+
+  # Permission for EventBridge to invoke Lambda
+  EventBridgeInvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FerryTrackerFunction
+      Action: 'lambda:InvokeFunction'
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduleRule.Arn
 
 Outputs:
   WebsiteURL:
-    Description: "URL for the Vashon School Ferry Commute Tracker"
+    Description: "Public URL for the Vashon School Ferry Commute Tracker"
     Value: !GetAtt FerryWebsiteBucket.WebsiteURL
   BucketName:
     Description: "S3 Bucket Name"
     Value: !Ref FerryWebsiteBucket
+  LambdaFunctionName:
+    Description: "Lambda Function Name"
+    Value: !Ref FerryTrackerFunction
   LambdaFunctionArn:
     Description: "Lambda Function ARN"
     Value: !GetAtt FerryTrackerFunction.Arn
