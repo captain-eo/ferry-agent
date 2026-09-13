@@ -527,9 +527,7 @@
       const rawBriefing = currentData.executive_briefing || 'Analyzing ferry telemetry and school bus schedules...';
       
       const formatted = rawBriefing
-        .split('
-
-')
+        .split(/\n\n+/)
         .map(p => `<p class="leading-relaxed">${p.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')}</p>`)
         .join('');
       container.innerHTML = formatted;
