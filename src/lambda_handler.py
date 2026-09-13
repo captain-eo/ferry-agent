@@ -60,11 +60,16 @@ def is_school_commute_window(now_dt: datetime) -> Tuple[bool, str]:
 
 def check_offpeak_should_run(s3_client, bucket_name: str, now_dt: datetime) -> Tuple[bool, float]:
     """
-    For off-peak times, checks whether we should run the 1-hour scheduled refresh.
+    For off-peak times, checks whether we should run the scheduled refresh.
+    Default interval is 15 minutes.
     Returns (should_run, minutes_since_last_update).
     """
     if not bucket_name or bucket_name == "vashon-ferry-commute":
         return True, 999.0
+
+    target_interval = COMMUTE_SCHEDULE.get("offpeak_interval_minutes", 15)
+    # Allow a 2-minute buffer so e.g. a 4-minute cron fires smoothly around ~13-16 minutes
+    threshold_minutes = max(1.0, float(target_interval - 2))
 
     try:
         head_res = s3_client.head_object(Bucket=bucket_name, Key="data.json")
@@ -72,8 +77,7 @@ def check_offpeak_should_run(s3_client, bucket_name: str, now_dt: datetime) -> T
         if last_modified:
             now_utc = datetime.now(timezone.utc)
             elapsed_minutes = (now_utc - last_modified).total_seconds() / 60.0
-            # If last update was less than 50 mins ago and it's not the top of the hour, skip
-            if elapsed_minutes < 50.0 and now_dt.minute >= 5:
+            if elapsed_minutes < threshold_minutes:
                 return False, elapsed_minutes
             return True, elapsed_minutes
     except Exception:
@@ -100,8 +104,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     if not is_commute and not force_run:
         should_run, elapsed_mins = check_offpeak_should_run(s3, bucket_name, now_pacific)
+        target_interval = COMMUTE_SCHEDULE.get("offpeak_interval_minutes", 15)
         if not should_run:
-            msg = f"Off-peak window; last update was {elapsed_mins:.1f} minutes ago. Throttled to hourly refresh."
+            msg = f"Off-peak window; last update was {elapsed_mins:.1f} minutes ago. Throttled to ~{target_interval}m refresh."
             print(f"[INFO] {msg}")
             return {
                 "statusCode": 200,
@@ -109,11 +114,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "status": "skipped_offpeak_throttle",
                     "message": msg,
                     "schedule_label": commute_label,
-                    "next_scheduled_run": "top of the hour"
+                    "target_interval_minutes": target_interval,
+                    "next_scheduled_run": f"in ~{max(1, round(target_interval - elapsed_mins))} minutes"
                 })
             }
         else:
-            print(f"[INFO] Off-peak hourly tick triggered (elapsed: {elapsed_mins:.1f} mins).")
+            print(f"[INFO] Off-peak {target_interval}m tick triggered (elapsed: {elapsed_mins:.1f} mins).")
 
     # 2. Try to fetch previous AI state from S3 to avoid cold-start LLM invocations
     cached_ai_state = None

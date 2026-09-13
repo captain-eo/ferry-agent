@@ -36,7 +36,7 @@ COMMUTE_SCHEDULE = {
     # Monday - Friday Afternoon & Sports Return: 2:30 PM - 6:00 PM
     "pm_start": (14, 30),
     "pm_end": (18, 0),
-    "offpeak_interval_minutes": 60,
+    "offpeak_interval_minutes": 15,
 }
 
 # AWS Settings
