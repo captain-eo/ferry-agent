@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Fauntleroy to Vashon School Commute Ferry Tracker
+  Automated Lambda updating an S3 static site using WSDOT feeds and Gemini Flash.
+
+Parameters:
+  GeminiApiKey:
+    Type: String
+    NoEcho: true
+    Description: Google Gemini Flash API Key for AI investigation.
+    Default: ""
+  GeminiModel:
+    Type: String
+    Default: "gemini-2.5-flash"
+    Description: Gemini model variant to use.
+  ScheduleCron:
+    Type: String
+    Default: "rate(4 minutes)"
+    Description: EventBridge invocation schedule.
+
+Resources:
+  # S3 Bucket for Static Website Hosting
+  FerryWebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "vashon-ferry-commute-${AWS::AccountId}"
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  # Bucket Policy allowing public read for static website
+  FerryWebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FerryWebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub "${FerryWebsiteBucket.Arn}/*"
+
+  # AWS Lambda Function
+  FerryTrackerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../
+      Handler: src.lambda_handler.lambda_handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref FerryWebsiteBucket
+          GEMINI_API_KEY: !Ref GeminiApiKey
+          GEMINI_MODEL: !Ref GeminiModel
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref FerryWebsiteBucket
+      Events:
+        ScheduledPoll:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleCron
+            Name: FerryTrackerCron
+            Description: Triggers ferry telemetry collector and AI analysis every 4 minutes.
+
+Outputs:
+  WebsiteURL:
+    Description: "URL for the Vashon School Ferry Commute Tracker"
+    Value: !GetAtt FerryWebsiteBucket.WebsiteURL
+  BucketName:
+    Description: "S3 Bucket Name"
+    Value: !Ref FerryWebsiteBucket
+  LambdaFunctionArn:
+    Description: "Lambda Function ARN"
+    Value: !GetAtt FerryTrackerFunction.Arn
