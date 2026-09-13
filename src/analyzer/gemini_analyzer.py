@@ -199,8 +199,8 @@ def _build_gemini_prompt(heuristic_data: Dict[str, Any], telemetry: Dict[str, An
         "5. K-5 Elementary students (CES) have an official school chaperone on the 8:05 AM (or 8:15 AM on 2-boat) and 4:40 PM ferries.\n\n"
         "Output ONLY a raw JSON object with no markdown fences, conforming to:\n"
         "{\n"
-        "  \"executive_briefing\": \"Clear 2-3 paragraph synthesis explaining today's/Monday's schedule mode, exact target ferries, bus catchability, and sports bus info.\",\n"
-        "  \"insights\": [\"bullet 1\", \"bullet 2\"],\n"
+        "  \"executive_briefing\": \"Concise 1-2 sentence executive status (max 40 words). Summarize operating mode (2-boat vs 3-boat), overall delay status, and whether buses are safe to catch. Do NOT list individual sailing times (they are displayed in cards below). Keep it punchy and direct with zero fluff.\",\n"
+        "  \"insights\": [\"short insight 1\", \"short insight 2\"],\n"
         "  \"parent_action_items\": [\"action 1\", \"action 2\"]\n"
         "}"
     )

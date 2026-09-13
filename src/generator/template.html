@@ -113,83 +113,66 @@
   <!-- MAIN CONTAINER -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-    <!-- SCHEDULE MODE BANNER -->
-    <div id="schedule-mode-banner" class="rounded-xl border p-4 transition-all duration-300">
-      <!-- Injected via JavaScript -->
-    </div>
+    <!-- UNIFIED SCHOOL COMMUTE BOARD -->
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl overflow-hidden">
+      <!-- Board Top Bar: Direction Toggle + Day & Mode Badges -->
+      <div class="p-3.5 sm:p-4 border-b border-slate-800/80 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Commute Day Badge -->
+          <span id="commute-day-badge" class="px-2.5 py-1 rounded-lg bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-xs font-bold tracking-wide flex items-center gap-1.5">
+            <i data-lucide="calendar" class="w-3.5 h-3.5"></i>
+            <span id="commute-day-text">Monday Morning Commute</span>
+          </span>
 
-    <!-- COMMUTE CONTROLS / FILTERS -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 p-2 bg-slate-900/60 rounded-xl border border-slate-800">
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1 px-1">Commute Direction</label>
-        <div class="grid grid-cols-2 gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800 text-xs font-medium">
-          <button id="dir-am-btn" onclick="setDirection('AM')" class="py-1.5 rounded-md text-center transition bg-emerald-600 text-white shadow-sm">
-            🌅 AM: To School
+          <!-- Operating Mode Badge -->
+          <span id="commute-mode-badge" class="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-bold tracking-wide flex items-center gap-1.5">
+            <span id="commute-mode-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span id="commute-mode-text">3-Boat Schedule</span>
+          </span>
+        </div>
+
+        <!-- AM / PM Direction Switch -->
+        <div class="inline-flex p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-medium">
+          <button id="dir-am-btn" onclick="setDirection('AM')" class="px-3.5 py-1.5 rounded-lg transition bg-emerald-600 text-white font-semibold shadow-sm flex items-center gap-1.5">
+            <span>🌅 Morning to School</span>
           </button>
-          <button id="dir-pm-btn" onclick="setDirection('PM')" class="py-1.5 rounded-md text-center transition text-slate-400 hover:text-white">
-            🌇 PM: Return Home
+          <button id="dir-pm-btn" onclick="setDirection('PM')" class="px-3.5 py-1.5 rounded-lg transition text-slate-400 hover:text-white flex items-center gap-1.5">
+            <span>🌇 Return & Sports</span>
           </button>
         </div>
       </div>
 
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1 px-1">School Group</label>
-        <select id="school-select" onchange="renderActiveView()" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500">
-          <option value="all">All Schools (High, Middle & Elementary)</option>
-          <option value="vhs_mcm">Vashon High & McMurray Middle (Grades 6-12)</option>
-          <option value="ces">Chautauqua Elementary (Grades K-5 • Chaperoned)</option>
-        </select>
-      </div>
-
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1 px-1">Schedule Variant</label>
-        <select id="variant-select" onchange="renderActiveView()" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500">
-          <option value="auto">Auto-Detect Day</option>
-          <option value="regular">Regular Weekday Start</option>
-          <option value="friday_pdd">Friday Late Start (PDD)</option>
-          <option value="sports">After-School Sports / Activity Bus</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- AI COMMUTER ADVISOR HERO CARD -->
-    <div class="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900/90 to-emerald-950/40 p-5 sm:p-6 shadow-xl">
-      <div class="flex items-center justify-between gap-2 mb-3">
-        <div class="flex items-center gap-2">
-          <span class="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30">
+      <div class="p-4 sm:p-5 space-y-4">
+        <!-- Crisp AI Executive Advisory (1-2 sentences) -->
+        <div class="p-3 rounded-xl border border-slate-800 bg-slate-950/70 flex items-start gap-3">
+          <span class="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30 shrink-0 mt-0.5">
             <i data-lucide="sparkles" class="w-4 h-4"></i>
           </span>
-          <span class="text-sm font-semibold text-emerald-400 tracking-wide uppercase">AI Commuter Briefing</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Live Commute Advisory</span>
+              <span id="ai-model-tag" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono">Gemini Flash</span>
+            </div>
+            <div id="ai-briefing-content" class="text-xs sm:text-sm text-slate-200 leading-relaxed font-normal">
+              <!-- Injected 1-2 sentence briefing -->
+            </div>
+          </div>
         </div>
-        <span id="ai-model-tag" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono">
-          Gemini Flash
-        </span>
-      </div>
 
-      <div id="ai-briefing-content" class="text-sm sm:text-base text-slate-200 leading-relaxed space-y-2.5">
-        <!-- AI synthesis injected here -->
-      </div>
+        <!-- Target Sailings Cards -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <h2 id="target-section-title" class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="clock" class="w-4 h-4 text-emerald-400"></i>
+              Target Sailings & Bus Connections
+            </h2>
+            <span id="route-direction-label" class="text-xs text-slate-400 font-medium">Fauntleroy → Vashon</span>
+          </div>
 
-      <!-- BUS CATCHABILITY BADGES -->
-      <div id="bus-catchability-container" class="mt-4 pt-4 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <!-- Injected here -->
-      </div>
-    </div>
-
-    <!-- PRIMARY TARGET SAILINGS SECTION -->
-    <div>
-      <div class="flex items-center justify-between mb-3">
-        <h2 id="target-section-title" class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="clock" class="w-5 h-5 text-emerald-400"></i>
-          Recommended School Sailings
-        </h2>
-        <span id="target-count-badge" class="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-          Target Sailings
-        </span>
-      </div>
-
-      <div id="target-sailings-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <!-- Sailing Cards injected dynamically -->
+          <div id="target-sailings-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            <!-- Target Sailing Cards injected dynamically -->
+          </div>
+        </div>
       </div>
     </div>
 
@@ -437,18 +420,17 @@
       const amBtn = document.getElementById('dir-am-btn');
       const pmBtn = document.getElementById('dir-pm-btn');
       if (dir === 'AM') {
-        amBtn.className = 'py-1.5 rounded-md text-center transition bg-emerald-600 text-white shadow-sm';
-        pmBtn.className = 'py-1.5 rounded-md text-center transition text-slate-400 hover:text-white';
+        amBtn.className = 'px-3.5 py-1.5 rounded-lg transition bg-emerald-600 text-white font-semibold shadow-sm flex items-center gap-1.5';
+        pmBtn.className = 'px-3.5 py-1.5 rounded-lg transition text-slate-400 hover:text-white flex items-center gap-1.5';
       } else {
-        pmBtn.className = 'py-1.5 rounded-md text-center transition bg-emerald-600 text-white shadow-sm';
-        amBtn.className = 'py-1.5 rounded-md text-center transition text-slate-400 hover:text-white';
+        pmBtn.className = 'px-3.5 py-1.5 rounded-lg transition bg-emerald-600 text-white font-semibold shadow-sm flex items-center gap-1.5';
+        amBtn.className = 'px-3.5 py-1.5 rounded-lg transition text-slate-400 hover:text-white flex items-center gap-1.5';
       }
       renderActiveView();
     }
 
     function renderActiveView() {
-      updateControlLabels();
-      renderScheduleModeBanner();
+      renderCommuteHeader();
       renderAIBriefing();
       renderTargetSailings();
       renderVesselsList();
@@ -458,81 +440,46 @@
       lucide.createIcons();
     }
 
-    function updateControlLabels() {
+    function renderCommuteHeader() {
       const isWeekend = currentData.is_weekend;
+      const isFriday = currentData.is_friday_pdd;
+      const mode = currentData.schedule_mode || '3-boat';
+      const dayTextEl = document.getElementById('commute-day-text');
+      const modeTextEl = document.getElementById('commute-mode-text');
+      const modeBadge = document.getElementById('commute-mode-badge');
+      const modeDot = document.getElementById('commute-mode-dot');
+      const routeLabel = document.getElementById('route-direction-label');
       const amBtn = document.getElementById('dir-am-btn');
       const pmBtn = document.getElementById('dir-pm-btn');
-      const sectionTitle = document.getElementById('target-section-title');
 
       if (isWeekend) {
-        amBtn.innerHTML = '🌅 Monday AM: To School';
-        pmBtn.innerHTML = '🌇 Monday PM: Return Home';
-        sectionTitle.innerHTML = '<i data-lucide="clock" class="w-5 h-5 text-emerald-400"></i> Recommended Monday Morning Sailings';
+        dayTextEl.innerText = 'Monday School Commute';
+        amBtn.innerHTML = '<span>🌅 Monday AM: To School</span>';
+        pmBtn.innerHTML = '<span>🌇 Monday PM: Return & Sports</span>';
+      } else if (isFriday) {
+        dayTextEl.innerText = 'Friday Late Start (PDD)';
+        amBtn.innerHTML = '<span>🌅 AM: Late Start</span>';
+        pmBtn.innerHTML = '<span>🌇 PM: Return & Sports</span>';
       } else {
-        amBtn.innerHTML = '🌅 AM: To School';
-        pmBtn.innerHTML = '🌇 PM: Return Home';
-        sectionTitle.innerHTML = '<i data-lucide="clock" class="w-5 h-5 text-emerald-400"></i> Recommended School Sailings';
-      }
-    }
-
-    function renderScheduleModeBanner() {
-      const banner = document.getElementById('schedule-mode-banner');
-      const mode = currentData.schedule_mode || '3-boat';
-      const isFriday = currentData.is_friday_pdd;
-      const isWeekend = currentData.is_weekend;
-      const reason = currentData.bulletin_mode_reason || '';
-
-      if (isWeekend) {
-        banner.className = 'rounded-xl border border-indigo-500/40 bg-indigo-950/40 p-4 text-indigo-200';
-        banner.innerHTML = `
-          <div class="flex items-start gap-3">
-            <i data-lucide="calendar" class="w-5 h-5 text-indigo-400 shrink-0 mt-0.5"></i>
-            <div>
-              <div class="font-bold text-sm sm:text-base text-indigo-300 flex items-center gap-2">
-                WEEKEND PREVIEW: MONDAY MORNING COMMUTE
-                <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold uppercase">${mode}</span>
-              </div>
-              <div class="text-xs sm:text-sm text-indigo-200/90 mt-1 leading-relaxed">
-                School is not in session today (${currentData.current_weekday_name || 'Weekend'}). Displaying target departures for <strong>Monday Morning</strong>. ${reason}
-              </div>
-            </div>
-          </div>
-        `;
-        return;
+        dayTextEl.innerText = `${currentData.current_weekday_name || 'Weekday'} School Commute`;
+        amBtn.innerHTML = '<span>🌅 AM: To School</span>';
+        pmBtn.innerHTML = '<span>🌇 PM: Return & Sports</span>';
       }
 
       if (mode === '2-boat') {
-        banner.className = 'rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200';
-        banner.innerHTML = `
-          <div class="flex items-start gap-3">
-            <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-400 shrink-0 mt-0.5"></i>
-            <div>
-              <div class="font-bold text-sm sm:text-base text-amber-300 flex items-center gap-2">
-                TWO-BOAT CONTINGENCY SCHEDULE ACTIVE
-                ${isFriday ? '<span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Friday PDD Late Start</span>' : ''}
-              </div>
-              <div class="text-xs sm:text-sm text-amber-200/90 mt-1 leading-relaxed">
-                ${reason}
-              </div>
-            </div>
-          </div>
-        `;
+        modeTextEl.innerText = '2-Boat Reduced Service';
+        modeBadge.className = 'px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-bold tracking-wide flex items-center gap-1.5';
+        modeDot.className = 'w-2 h-2 rounded-full bg-amber-400';
       } else {
-        banner.className = 'rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-200';
-        banner.innerHTML = `
-          <div class="flex items-start gap-3">
-            <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5"></i>
-            <div>
-              <div class="font-bold text-sm sm:text-base text-emerald-300 flex items-center gap-2">
-                NORMAL THREE-BOAT SCHEDULE ACTIVE
-                ${isFriday ? '<span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Friday PDD Late Start</span>' : ''}
-              </div>
-              <div class="text-xs sm:text-sm text-emerald-200/90 mt-1">
-                Full three-vessel rotation is running. ${reason}
-              </div>
-            </div>
-          </div>
-        `;
+        modeTextEl.innerText = '3-Boat Schedule (Normal)';
+        modeBadge.className = 'px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-bold tracking-wide flex items-center gap-1.5';
+        modeDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+      }
+
+      if (routeLabel) {
+        routeLabel.innerText = activeDirection === 'AM' 
+          ? 'Fauntleroy → Vashon Island' 
+          : 'Vashon Island → Fauntleroy';
       }
     }
 
@@ -546,58 +493,81 @@
         .join('');
       container.innerHTML = formatted;
 
-      document.getElementById('ai-model-tag').innerText = currentData.ai_model || 'Gemini Flash';
-
-      // Catchability badges
-      const catchContainer = document.getElementById('bus-catchability-container');
-      const evalTargets = activeDirection === 'AM' 
-        ? (currentData.am_commute?.evaluated_targets || {}) 
-        : (currentData.pm_commute?.evaluated_targets || {});
-
-      let html = '';
-      for (const [k, v] of Object.entries(evalTargets)) {
-        if (!v || !v.scheduled_time_display) continue;
-        const catchColor = v.catchability === 'SAFE' 
-          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' 
-          : v.catchability === 'TIGHT' 
-            ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' 
-            : 'border-red-500/30 bg-red-500/10 text-red-300';
-            
-        html += `
-          <div class="p-2.5 rounded-lg border ${catchColor} flex items-start justify-between gap-2 text-xs">
-            <div>
-              <div class="font-semibold text-slate-100 flex items-center gap-1.5">
-                ${v.scheduled_time_display} (${v.vessel_name || 'Boat'})
-                <span class="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase ${catchColor}">${v.catchability}</span>
-              </div>
-              <div class="text-slate-300 mt-0.5 text-[11px] leading-tight">${v.bus_note || ''}</div>
-            </div>
-            <div class="text-right shrink-0">
-              <span class="text-slate-400">Est Arr:</span>
-              <div class="font-mono font-bold text-white">${v.estimated_arrival_display}</div>
-            </div>
-          </div>
-        `;
+      const modelTag = document.getElementById('ai-model-tag');
+      if (modelTag) {
+        modelTag.innerText = currentData.ai_model || 'Gemini Flash';
       }
-      catchContainer.innerHTML = html;
     }
 
     function renderTargetSailings() {
       const grid = document.getElementById('target-sailings-grid');
-      const schoolFilter = document.getElementById('school-select').value;
-      const variantFilter = document.getElementById('variant-select').value;
-
       const targets = activeDirection === 'AM' 
         ? (currentData.am_commute?.evaluated_targets || {}) 
         : (currentData.pm_commute?.evaluated_targets || {});
 
       let cards = '';
       for (const [key, item] of Object.entries(targets)) {
-        if (!item) continue;
-        
-        if (schoolFilter === 'vhs_mcm' && !key.includes('vhs')) continue;
-        if (schoolFilter === 'ces' && !key.includes('ces')) continue;
-        if (variantFilter === 'sports' && !key.includes('sports')) continue;
+        if (!item || !item.scheduled_time_display) continue;
+
+        const isDelayed = item.delay_minutes > 0;
+        const delayBadge = isDelayed 
+          ? `<span class="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold">+${item.delay_minutes}m Late</span>`
+          : `<span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold">On Time</span>`;
+
+        let titleLabel = 'Commute Target';
+        if (key.includes('vhs')) titleLabel = 'VHS & McMurray (Grades 6–12)';
+        else if (key.includes('ces')) titleLabel = 'Chautauqua Elementary (CES • Chaperoned)';
+        else if (key.includes('sports_bus_late')) titleLabel = 'Late Practice & Clubs Return';
+        else if (key.includes('sports')) titleLabel = 'Sports / After-School Activity Bus';
+        else if (key.includes('pm_regular')) titleLabel = 'Regular Dismissal Return';
+
+        const catchBadgeColor = item.catchability === 'SAFE'
+          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+          : item.catchability === 'TIGHT'
+            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+            : 'bg-red-500/15 text-red-300 border-red-500/30';
+
+        cards += `
+          <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-4 flex flex-col justify-between hover:border-slate-700 transition">
+            <div>
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-300 truncate">${titleLabel}</span>
+                ${delayBadge}
+              </div>
+
+              <div class="flex items-baseline justify-between mb-3">
+                <div>
+                  <div class="text-3xl font-black font-mono tracking-tight text-white">
+                    ${item.scheduled_time_display}
+                  </div>
+                  <div class="text-xs text-slate-400 mt-0.5">
+                    Est. Arrival ~<span class="text-slate-200 font-medium font-mono">${item.estimated_arrival_display}</span>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="text-[11px] text-slate-400">Assigned Vessel</div>
+                  <div class="text-sm font-semibold text-emerald-400">${item.vessel_name || 'WSF Ferry'}</div>
+                </div>
+              </div>
+
+              <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 flex items-start gap-2 mb-3">
+                <i data-lucide="bus" class="w-4 h-4 text-blue-400 shrink-0 mt-0.5"></i>
+                <span class="leading-tight">${item.bus_note || 'Meets dock bus.'}</span>
+              </div>
+            </div>
+
+            <div class="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs">
+              <span class="text-slate-400">Vessel: <strong class="text-slate-200">${item.status}</strong></span>
+              <span class="px-2 py-0.5 rounded-md border text-[11px] font-bold tracking-wider ${catchBadgeColor}">
+                BUS: ${item.catchability}
+              </span>
+            </div>
+          </div>
+        `;
+      }
+
+      grid.innerHTML = cards || '<div class="col-span-full p-6 text-center text-slate-400 bg-slate-900 rounded-xl border border-slate-800">No scheduled sailings for this selection.</div>';
+    }
 
         const isDelayed = item.delay_minutes > 0;
         const delayBadge = isDelayed 
@@ -652,7 +622,7 @@
         `;
       }
 
-      grid.innerHTML = cards || '<div class="col-span-full p-6 text-center text-slate-400 bg-slate-900 rounded-xl border border-slate-800">No sailings match current filter selection.</div>';
+      grid.innerHTML = cards || '<div class="col-span-full p-6 text-center text-slate-400 bg-slate-900 rounded-xl border border-slate-800">No scheduled sailings for this direction.</div>';
     }
 
     function renderVesselsList() {

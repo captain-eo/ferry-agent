@@ -275,40 +275,25 @@ def _generate_heuristic_briefing(
     pm_eval: Dict[str, Any],
     bulletins_data: Dict[str, Any]
 ) -> str:
-    """Synthesizes human-friendly executive briefing paragraph."""
-    lines = []
-    
+    """Synthesizes a concise 1-2 sentence executive briefing."""
     if is_weekend:
-        lines.append(f"🏖️ **Weekend Preview (Showing Monday Morning Commute)**: School is not in session today ({now.strftime('%A')}). Below are the target sailings you need for **Monday morning**.")
-        
-        if mode == "3-boat":
-            lines.append("✅ **Monday Schedule Status**: Route will operate on the **Three-Boat Schedule (Normal)**. " + mode_reason)
-        else:
-            lines.append("⚠️ **Monday Schedule Status**: Route is scheduled for **Two-Boat Reduced Service**. " + mode_reason)
+        mode_desc = "normal three-boat schedule" if mode == "3-boat" else "two-boat reduced schedule"
+        return f"🏖️ **Weekend Preview (Showing Monday Morning Commute)**: School is not in session today ({now.strftime('%A')}). Route operates on the {mode_desc} on Monday with safe school bus connections."
 
-        vhs_target = am_eval["evaluated_targets"].get("vhs_mcm", {}).get("scheduled_time_display", "7:05 AM")
-        ces_target = am_eval["evaluated_targets"].get("ces", {}).get("scheduled_time_display", "8:05 AM")
-        lines.append(f"🎒 **Monday Commute Targets**: High & Middle School (VHS/McMurray) target is **{vhs_target}**; Elementary (CES) target is **{ces_target}** from Fauntleroy.")
-        lines.append("🏅 **Monday Sports & Activities**: Students participating in Monday sports or clubs will take the **4:40 PM** return ferry.")
+    parts = []
+    if mode == "2-boat":
+        parts.append("⚠️ **Two-Boat Schedule Active**: Washington State Ferries has reduced service on the route.")
     else:
-        if mode == "2-boat":
-            lines.append("⚠️ **Route Operating on Two-Boat Schedule**: Washington State Ferries has reduced service on the Fauntleroy/Vashon/Southworth route.")
-        else:
-            lines.append("✅ **Route Operating on Normal Three-Boat Schedule**: Full three-vessel service is active.")
-            
-        if is_friday:
-            lines.append("🎉 **Friday Late Start (PDD)**: Students start school later today. Commuters should take the **8:25 AM** (VHS/McMurray) or **9:30 AM** (CES) ferry from Fauntleroy.")
-        else:
-            vhs_target = am_eval["evaluated_targets"].get("vhs_mcm", {}).get("scheduled_time_display", "7:05 AM")
-            ces_target = am_eval["evaluated_targets"].get("ces", {}).get("scheduled_time_display", "8:05 AM")
-            lines.append(f"📅 **Regular Weekday Commute ({target_day_name})**: High/Middle school target is **{vhs_target}**; Elementary target is **{ces_target}**.")
-            
-        lines.append("🏅 **Sports & After-School Activities**: Students participating in sports or extracurriculars take the **4:40 PM** ferry (or 5:40 PM for late practice) returning to Fauntleroy.")
+        parts.append("✅ **Normal Three-Boat Schedule Active**: All three vessels are running.")
 
+    if is_friday:
+        parts.append("🎉 **Friday Late Start (PDD)**: Target departures shift later for delayed school start.")
+    else:
         vhs_target_obj = am_eval["evaluated_targets"].get("vhs_mcm", {})
-        if vhs_target_obj.get("delay_minutes", 0) > 0:
-            lines.append(f"⏱️ **Delay Alert**: Morning sailing {vhs_target_obj.get('scheduled_time_display')} is experiencing ~{vhs_target_obj.get('delay_minutes')} mins delay ({vhs_target_obj.get('status')}).")
+        delay = vhs_target_obj.get("delay_minutes", 0)
+        if delay > 0:
+            parts.append(f"⏱️ **Delay Alert**: Morning sailing is delayed ~{delay} min ({vhs_target_obj.get('status', 'delayed')}).")
         else:
-            lines.append("🚢 **Vessel Status**: Morning commute sailings are tracking on time with safe bus connections.")
+            parts.append("Morning commute sailings are tracking on time with safe bus connections at Vashon dock.")
 
-    return "\n\n".join(lines)
+    return " ".join(parts)
