@@ -474,8 +474,8 @@
 
       if (routeLabel) {
         routeLabel.innerText = activeDirection === 'AM' 
-          ? 'Fauntleroy → Vashon Island' 
-          : 'Vashon Island → Fauntleroy';
+          ? 'Fauntleroy → Vashon Island (Morning to School)' 
+          : 'Vashon Island → Fauntleroy (Returning Ferries)';
       }
     }
 
@@ -497,13 +497,14 @@
 
     function renderTargetSailings() {
       const grid = document.getElementById('target-sailings-grid');
-      const targets = activeDirection === 'AM' 
-        ? (currentData.am_commute?.evaluated_targets || {}) 
-        : (currentData.pm_commute?.evaluated_targets || {});
+      const isPM = activeDirection === 'PM';
+      const targets = isPM 
+        ? (currentData.pm_commute?.evaluated_targets || {}) 
+        : (currentData.am_commute?.evaluated_targets || {});
 
       let cards = '';
       for (const [key, item] of Object.entries(targets)) {
-        if (!item || !item.scheduled_time_display) continue;
+        if (!item || (!item.scheduled_time_display && !item.estimated_arrival_display)) continue;
 
         const isDelayed = item.delay_minutes > 0;
         const delayBadge = isDelayed 
@@ -511,8 +512,8 @@
           : `<span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold">On Time</span>`;
 
         let titleLabel = 'Commute Target';
-        if (key.includes('vhs')) titleLabel = 'VHS & McMurray (Grades 6–12)';
-        else if (key.includes('ces')) titleLabel = 'Chautauqua Elementary (CES • Chaperoned)';
+        if (key.includes('vhs')) titleLabel = isPM ? 'VHS & McMurray Dismissal' : 'VHS & McMurray (Grades 6–12)';
+        else if (key.includes('ces')) titleLabel = isPM ? 'Chautauqua Elementary (CES)' : 'Chautauqua Elementary (CES • Chaperoned)';
         else if (key.includes('sports_bus_late')) titleLabel = 'Late Practice & Clubs Return';
         else if (key.includes('sports')) titleLabel = 'Sports / After-School Activity Bus';
         else if (key.includes('pm_regular')) titleLabel = 'Regular Dismissal Return';
@@ -522,6 +523,19 @@
           : item.catchability === 'TIGHT'
             ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
             : 'bg-red-500/15 text-red-300 border-red-500/30';
+
+        // For returning ferries (PM), parents want to see the time the ferry arrives at Fauntleroy
+        // as the big main text, and the smaller text being the estimated departure time from Vashon.
+        const mainTime = isPM 
+          ? (item.estimated_arrival_display || item.scheduled_time_display) 
+          : item.scheduled_time_display;
+        const mainLabel = isPM ? 'Arrives Fauntleroy' : 'Departs Fauntleroy';
+        const mainLabelColor = isPM ? 'text-emerald-400' : 'text-blue-400';
+
+        const subTime = isPM 
+          ? (item.estimated_departure_display || item.scheduled_time_display) 
+          : item.estimated_arrival_display;
+        const subLabel = isPM ? 'Est. Departure Vashon' : 'Est. Arrival Vashon';
 
         cards += `
           <div class="rounded-xl border border-slate-800 bg-slate-950/80 p-4 flex flex-col justify-between hover:border-slate-700 transition">
@@ -533,11 +547,14 @@
 
               <div class="flex items-baseline justify-between mb-3">
                 <div>
-                  <div class="text-3xl font-black font-mono tracking-tight text-white">
-                    ${item.scheduled_time_display}
+                  <div class="text-[11px] font-bold uppercase tracking-wider ${mainLabelColor} mb-0.5">
+                    ${mainLabel}
                   </div>
-                  <div class="text-xs text-slate-400 mt-0.5">
-                    Est. Arrival ~<span class="text-slate-200 font-medium font-mono">${item.estimated_arrival_display}</span>
+                  <div class="text-3xl font-black font-mono tracking-tight text-white">
+                    ${mainTime}
+                  </div>
+                  <div class="text-xs text-slate-400 mt-1">
+                    ${subLabel}: <span class="text-slate-200 font-medium font-mono">${subTime}</span>
                   </div>
                 </div>
                 <div class="text-right">
