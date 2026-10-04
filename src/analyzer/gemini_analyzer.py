@@ -48,10 +48,14 @@ def compute_schedule_state_fingerprint(
     
     fingerprint_obj = {
         "schedule_mode": heuristic_data.get("schedule_mode"),
+        "service_status": heuristic_data.get("service_status"),
+        "has_cancelled_sailings": heuristic_data.get("has_cancelled_sailings"),
+        "cancelled_vessels": sorted(heuristic_data.get("cancelled_vessels") or []),
         "bulletin_mode_reason": heuristic_data.get("bulletin_mode_reason"),
         "bulletins": sorted(bulletin_signatures),
         "target_commute_day": heuristic_data.get("target_commute_day"),
         "is_friday_pdd": heuristic_data.get("is_friday_pdd"),
+        "is_next_day": heuristic_data.get("is_next_day"),
         "targets": sorted(target_sig),
     }
     
@@ -190,16 +194,20 @@ def _build_gemini_prompt(heuristic_data: Dict[str, Any], telemetry: Dict[str, An
         "and Chautauqua Elementary).\n\n"
         "Key Commute Rules:\n"
         "1. Vashon school district provides buses waiting at the Vashon north dock to meet the commuter ferries.\n"
-        "2. WEEKEND RULE: If today is Saturday or Sunday, school is NOT in session today. You MUST clearly state "
-        "   that you are presenting the upcoming MONDAY MORNING school commute plan. Explain whether Monday is expected "
-        "   to be in 3-boat (Normal) or 2-boat service based on bulletins, and list the Monday morning target sailings "
-        "   (7:05 AM for VHS/McM, 8:05 AM for CES on 3-boat; or 7:20 AM / 8:15 AM on 2-boat).\n"
+        "2. WEEKEND / NEXT DAY RULE: If today is Saturday or Sunday, or if it is evening (after 7:00 PM), today's commute is finished. You MUST clearly state "
+        "   that you are presenting the upcoming NEXT SCHOOL DAY (tomorrow or Monday) school commute plan. Explain whether the target day is expected "
+        "   to be in 3-boat (Normal) or 2-boat service based on bulletins, and list the morning target sailings "
+        "   (7:05 AM for VHS/McM, 8:05 AM for CES on 3-boat; or 7:20 AM / 8:15 AM on 2-boat; or Friday 8:25 AM / 9:30 AM).\n"
         "3. Friday is ALWAYS Late Start (PDD - Professional Development Day). Departures shift to 8:25 AM (VHS/McM) and 9:30 AM (CES).\n"
         "4. Students doing after-school sports or clubs take the late sports bus connecting with the 4:40 PM ferry.\n"
-        "5. K-5 Elementary students (CES) have an official school chaperone on the 8:05 AM (or 8:15 AM on 2-boat) and 4:40 PM ferries.\n\n"
+        "5. K-5 Elementary students (CES) have an official school chaperone on the 8:05 AM (or 8:15 AM on 2-boat) and 4:40 PM ferries.\n"
+        "6. CREW SHORTAGE / CANCELLED SAILINGS: If a vessel is out of service or uncrewed (e.g. Sealth #3 cancelled due to lack of crew), "
+        "   WSF keeps the route on the 3-BOAT TIMETABLE with the remaining boats (Kittitas & Kitsap). This is NOT an official 2-boat schedule change. "
+        "   Clearly explain that the route operates on the 3-boat timetable with cancelled sailings for the #3 boat, that the 7:05 AM departure is CANCELLED, "
+        "   and advise families to take the next operating sailing (8:05 AM Kittitas).\n\n"
         "Output ONLY a raw JSON object with no markdown fences, conforming to:\n"
         "{\n"
-        "  \"executive_briefing\": \"Concise 1-2 sentence executive status (max 40 words). Summarize operating mode (2-boat vs 3-boat), overall delay status, and whether buses are safe to catch. Do NOT list individual sailing times (they are displayed in cards below). Keep it punchy and direct with zero fluff.\",\n"
+        "  \"executive_briefing\": \"Concise 1-2 sentence executive status (max 40 words). Summarize operating mode, cancellation status, overall delay status, and whether buses are safe to catch. Do NOT list individual sailing times (they are displayed in cards below). Keep it punchy and direct with zero fluff.\",\n"
         "  \"insights\": [\"short insight 1\", \"short insight 2\"],\n"
         "  \"parent_action_items\": [\"action 1\", \"action 2\"]\n"
         "}"
@@ -208,9 +216,13 @@ def _build_gemini_prompt(heuristic_data: Dict[str, Any], telemetry: Dict[str, An
     user_context = {
         "current_time": heuristic_data.get("current_time_display"),
         "is_weekend": heuristic_data.get("is_weekend"),
+        "is_next_day": heuristic_data.get("is_next_day"),
         "target_commute_day": heuristic_data.get("target_commute_day"),
         "target_commute_title": heuristic_data.get("target_commute_title"),
         "schedule_mode": heuristic_data.get("schedule_mode"),
+        "service_status": heuristic_data.get("service_status"),
+        "has_cancelled_sailings": heuristic_data.get("has_cancelled_sailings"),
+        "cancelled_vessels": heuristic_data.get("cancelled_vessels"),
         "bulletin_mode_reason": heuristic_data.get("bulletin_mode_reason"),
         "active_bulletins": [b.get("title") + ": " + b.get("content") for b in bulletins_data.get("triangle_bulletins", [])],
         "heuristic_evaluated_targets": heuristic_data.get("am_commute", {}).get("evaluated_targets", {}),

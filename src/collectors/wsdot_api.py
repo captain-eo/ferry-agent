@@ -63,22 +63,41 @@ def parse_time_hh_mm(iso_or_raw: Optional[str]) -> Optional[str]:
 def get_target_school_commute_date(dt: Optional[datetime] = None) -> Dict[str, Any]:
     """
     Returns target commute date.
-    If today is Saturday (weekday 5) or Sunday (weekday 6), shifts target to Monday.
+    If today is Saturday or Sunday, or if it is after 7:00 PM (19:00),
+    shifts target to the next school day:
+      - Mon-Thu after 7:00 PM -> Tomorrow (Tue-Fri)
+      - Fri after 7:00 PM -> Monday (+3 days)
+      - Saturday -> Monday (+2 days)
+      - Sunday -> Monday (+1 day)
     """
     now = dt or datetime.now(timezone(timedelta(hours=-7)))
     weekday = now.weekday()
+    hour = now.hour
+    is_after_7pm = (hour >= 19)
     is_weekend = (weekday in (5, 6))
+    is_next_day = False
     
     if weekday == 5:  # Saturday -> +2 days to Monday
         target_dt = now + timedelta(days=2)
+        is_weekend = True
     elif weekday == 6:  # Sunday -> +1 day to Monday
         target_dt = now + timedelta(days=1)
+        is_weekend = True
+    elif weekday == 4 and is_after_7pm:  # Friday after 7pm -> +3 days to Monday
+        target_dt = now + timedelta(days=3)
+        is_weekend = True
+        is_next_day = True
+    elif is_after_7pm:  # Mon-Thu after 7pm -> +1 day to tomorrow
+        target_dt = now + timedelta(days=1)
+        is_next_day = True
     else:
         target_dt = now
 
     return {
         "current_datetime": now,
         "is_weekend": is_weekend,
+        "is_next_day": is_next_day,
+        "is_after_7pm": is_after_7pm,
         "current_weekday_name": now.strftime("%A"),
         "target_date_str": target_dt.strftime("%Y-%m-%d"),
         "target_weekday_name": target_dt.strftime("%A"),
@@ -222,6 +241,20 @@ def fetch_today_schedule(date_str: Optional[str] = None, timeout: int = 15) -> D
         }
 
 
+def fetch_enriched_triangle_vessels(timeout: int = 10) -> List[Dict[str, Any]]:
+    """
+    Fetches real-time Triangle route vessels enriched with VesselWatch telemetry.
+    Optimized for fast, lightweight micro-API polling.
+    """
+    vessels = fetch_vessel_locations(timeout=timeout)
+    watch = fetch_vessel_watch(timeout=timeout)
+    for v in vessels:
+        mmsi = v.get("mmsi")
+        if mmsi in watch:
+            v.update(watch[mmsi])
+    return vessels
+
+
 def get_merged_ferry_telemetry(date_str: Optional[str] = None, simulated_time: Optional[datetime] = None) -> Dict[str, Any]:
     """
     Combines vessel locations, VesselWatch, and schedule.
@@ -230,21 +263,15 @@ def get_merged_ferry_telemetry(date_str: Optional[str] = None, simulated_time: O
     target_info = get_target_school_commute_date(simulated_time)
     sched_date = date_str or target_info["target_date_str"]
     
-    vessels = fetch_vessel_locations()
-    watch = fetch_vessel_watch()
+    vessels = fetch_enriched_triangle_vessels()
     schedule = fetch_today_schedule(sched_date)
-    
-    # Enrich vessels with watch telemetry
-    for v in vessels:
-        mmsi = v.get("mmsi")
-        if mmsi in watch:
-            v.update(watch[mmsi])
             
     pacific_now = simulated_time or datetime.now(timezone(timedelta(hours=-7)))
     
     return {
         "timestamp": pacific_now.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "is_weekend": target_info["is_weekend"],
+        "is_next_day": target_info["is_next_day"],
         "target_commute_date": target_info["target_date_str"],
         "target_commute_day_name": target_info["target_weekday_name"],
         "target_display_name": target_info["target_display_name"],

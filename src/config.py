@@ -12,6 +12,8 @@ WSDOT_VESSEL_LOCATIONS_URL = "https://www.wsdot.wa.gov/Ferries/API/Vessels/rest/
 WSDOT_VESSEL_WATCH_URL = "https://wsdot.com/ferries/vesselwatch/Vessels.ashx"
 WSDOT_SCHEDULE_API_URL = "https://www.wsdot.wa.gov/Ferries/API/Schedule/rest/schedule/{date}/14"
 WSDOT_BULLETIN_URL = "https://wsdot.com/ferries/schedule/Bulletin.aspx"
+WSDOT_ADDS_CANCELS_URL = "https://wsdot.com/Ferries/Schedule/addcancelbysimpleroute.aspx?routeid=14"
+WSDOT_SCHEDULE_DETAIL_URL = "https://wsdot.com/Ferries/Schedule/scheduledetailbyroute.aspx?route=f-v-s"
 
 # Terminals
 TERMINAL_FAUNTLEROY_ID = 9
@@ -41,7 +43,7 @@ COMMUTE_SCHEDULE = {
 
 # AWS Settings
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "vashon-ferry-commute")
-AWS_REGION = os.getenv("AWS_REGION", "us-west-2")
+VESSELS_API_URL = ""
 
 # VISD Commuter Schedule Rules
 VISD_COMMUTE_RULES: Dict[str, Any] = {
@@ -79,7 +81,7 @@ VISD_COMMUTE_RULES: Dict[str, Any] = {
                 "ces_regular": "16:40",
                 # Sports / Activity Late Bus
                 "vhs_mcm_sports_bus_1": "16:40",  # Connects with late activity bus (shares boat with CES)
-                "vhs_mcm_sports_bus_2": "17:40",  # Later sports practice / varsity games
+                "vhs_mcm_sports_bus_2": "17:45",  # Later sports practice / varsity games
                 # Early dismissal days
                 "vhs_mcm_early_dismissal": "11:20",
                 "ces_early_dismissal": "12:20",
@@ -101,7 +103,7 @@ VISD_COMMUTE_RULES: Dict[str, Any] = {
                 "vhs_mcm_regular": "15:25",
                 "ces_regular": "16:40",
                 "vhs_mcm_sports_bus_1": "16:40",
-                "vhs_mcm_sports_bus_2": "17:40",
+                "vhs_mcm_sports_bus_2": "17:45",
                 "vhs_mcm_early_dismissal": "11:20",
                 "ces_early_dismissal": "12:20",
             }

@@ -18,7 +18,10 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 echo "   Installing pure-Python dependencies (beautifulsoup4, soupsieve)..."
-python3 -m pip install beautifulsoup4 soupsieve -t "$BUILD_DIR" --quiet
+if ! python3 -m pip install beautifulsoup4 soupsieve -t "$BUILD_DIR" --quiet 2>/dev/null; then
+    echo "   (Pip network install unavailable; copying from local Python environment...)"
+    python3 -c "import shutil, bs4, soupsieve; from pathlib import Path; shutil.copytree(Path(bs4.__file__).parent, Path('$BUILD_DIR/bs4'), dirs_exist_ok=True); shutil.copytree(Path(soupsieve.__file__).parent, Path('$BUILD_DIR/soupsieve'), dirs_exist_ok=True)"
+fi
 
 echo "   Copying src/ application code and HTML template..."
 cp -r "$ROOT_DIR/src" "$BUILD_DIR/"
@@ -30,9 +33,23 @@ rm -f "$PACKAGE_ZIP"
 ZIP_SIZE=$(du -h "$PACKAGE_ZIP" | cut -f1)
 echo "   ✅ Bundle created successfully ($ZIP_SIZE) -> $PACKAGE_ZIP"
 
+FUNCTION_NAME="${FUNCTION_NAME:-vashon-ferry-tracker}"
+DEPLOY_MODE="code"
+
 if [ "$1" == "--package-only" ]; then
     echo "Done! (--package-only flag detected)"
     exit 0
+elif [ "$1" == "--full" ] || [ "$1" == "--infra" ]; then
+    DEPLOY_MODE="full"
+elif [ "$1" == "--code-only" ] || [ "$1" == "--zip-only" ] || [ "$1" == "--update-code" ]; then
+    DEPLOY_MODE="code"
+elif [ -n "$1" ]; then
+    echo "Usage:"
+    echo "  ./infra/deploy.sh               # Fast code deployment: packages & replaces Lambda zip (no IAM needed)"
+    echo "  ./infra/deploy.sh --code-only   # Explicit code-only deployment (same as default)"
+    echo "  ./infra/deploy.sh --package-only # Only build infra/lambda_package.zip locally"
+    echo "  ./infra/deploy.sh --full        # Full CloudFormation stack deployment (requires IAM permissions)"
+    exit 1
 fi
 
 # Step 2: Check AWS CLI
@@ -50,67 +67,81 @@ echo "🔑 Authenticated as AWS Account: $ACCOUNT_ID (Region: $REGION)"
 
 # Check Gemini API Key
 if [ -z "$GEMINI_API_KEY" ]; then
-    echo "⚠️  GEMINI_API_KEY environment variable is not set."
-    echo "   Lambda will operate using the built-in deterministic heuristic fallback."
-    echo "   You can add your key anytime in AWS Lambda -> Configuration -> Environment variables."
+    echo "ℹ️  GEMINI_API_KEY environment variable is not set."
+    echo "   Operating with built-in deterministic heuristic engine."
 fi
 
-# Step 3: Test CloudFormation / Lambda permissions
-echo "🔍 Checking AWS permissions..."
-CAN_DEPLOY_CFN=true
-if ! aws cloudformation describe-stacks --region "$REGION" >/dev/null 2>&1; then
-    CAN_DEPLOY_CFN=false
-fi
+# Step 3: Deploy
+if [ "$DEPLOY_MODE" == "code" ]; then
+    echo "⚡ Deploying code update directly to Lambda ($FUNCTION_NAME)..."
+    echo "   (No IAM or CloudFormation permissions needed)"
+    
+    if ! aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" >/dev/null 2>&1; then
+        echo "❌ Lambda function '$FUNCTION_NAME' not found in $REGION."
+        echo "   If this is initial setup, run './infra/deploy.sh --full' to create the stack,"
+        echo "   or upload '$PACKAGE_ZIP' manually in the AWS Lambda console."
+        exit 1
+    fi
 
-if [ "$CAN_DEPLOY_CFN" = true ]; then
-    echo "🚀 Step 3: Deploying CloudFormation infrastructure stack ($STACK_NAME)..."
-    aws cloudformation deploy \
-        --template-file "$SCRIPT_DIR/template.yaml" \
-        --stack-name "$STACK_NAME" \
-        --region "$REGION" \
-        --capabilities CAPABILITY_IAM \
-        --parameter-overrides "GeminiApiKey=${GEMINI_API_KEY:-}"
+    echo "⏱️  Ensuring EventBridge cron schedule is rate(15 minutes)..."
+    aws events put-rule \
+        --name "vashon-ferry-tracker-cron" \
+        --schedule-expression "rate(15 minutes)" \
+        --region "$REGION" >/dev/null 2>&1 || true
 
-    echo "⚡ Step 4: Updating Lambda function code with application package..."
     aws lambda update-function-code \
-        --function-name "vashon-ferry-tracker" \
+        --function-name "$FUNCTION_NAME" \
         --zip-file "fileb://$PACKAGE_ZIP" \
         --region "$REGION" > /dev/null
 
-    echo "⏳ Waiting for function code update to complete..."
-    aws lambda wait function-updated --function-name "vashon-ferry-tracker" --region "$REGION"
+    echo "⏳ Waiting for Lambda code update to complete..."
+    aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
 
-    echo "🔄 Step 5: Triggering initial run to populate static site..."
+    echo "🔄 Triggering run to refresh static site..."
     aws lambda invoke \
-        --function-name "vashon-ferry-tracker" \
+        --function-name "$FUNCTION_NAME" \
         --region "$REGION" \
         --log-type Tail \
         /tmp/vashon_lambda_test_output.json > /dev/null 2>&1 || true
 
     echo "=========================================================="
-    echo "🎉 DEPLOYMENT COMPLETE!"
+    echo "🎉 CODE DEPLOYMENT COMPLETE!"
+    echo "   Lambda function '$FUNCTION_NAME' updated with new zip ($ZIP_SIZE)."
+    echo "=========================================================="
+    exit 0
+
+elif [ "$DEPLOY_MODE" == "full" ]; then
+    echo "🚀 Deploying full CloudFormation infrastructure stack ($STACK_NAME)..."
+    echo "   (Requires IAM permissions to create/update execution role)"
+    aws cloudformation deploy \
+        --template-file "$SCRIPT_DIR/template.yaml" \
+        --stack-name "$STACK_NAME" \
+        --region "$REGION" \
+        --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+        --parameter-overrides "GeminiApiKey=${GEMINI_API_KEY:-}"
+
+    echo "⚡ Updating Lambda function code with application package..."
+    aws lambda update-function-code \
+        --function-name "$FUNCTION_NAME" \
+        --zip-file "fileb://$PACKAGE_ZIP" \
+        --region "$REGION" > /dev/null
+
+    echo "⏳ Waiting for function code update to complete..."
+    aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
+
+    echo "🔄 Triggering initial run to populate static site..."
+    aws lambda invoke \
+        --function-name "$FUNCTION_NAME" \
+        --region "$REGION" \
+        --log-type Tail \
+        /tmp/vashon_lambda_test_output.json > /dev/null 2>&1 || true
+
+    echo "=========================================================="
+    echo "🎉 FULL DEPLOYMENT COMPLETE!"
     echo "=========================================================="
     aws cloudformation describe-stacks \
         --stack-name "$STACK_NAME" \
         --region "$REGION" \
         --query "Stacks[0].Outputs" \
         --output table
-else
-    echo "⚠️  The current AWS credentials do not have CloudFormation/Lambda deploy permissions."
-    echo "   (Error: AccessDenied on cloudformation/lambda APIs)."
-    echo ""
-    echo "👉 You have two simple options to complete deployment:"
-    echo ""
-    echo "Option A (AWS Console Upload):"
-    echo "  1. In CloudFormation Console, create stack using infra/template.yaml."
-    echo "  2. In Lambda Console -> 'vashon-ferry-tracker' -> 'Upload from' -> select '$PACKAGE_ZIP'."
-    echo ""
-    echo "Option B (Attach IAM Permissions to user):"
-    echo "  Attach the following managed policies in IAM:"
-    echo "  - AWSCloudFormationFullAccess"
-    echo "  - AWSLambda_FullAccess"
-    echo "  - AmazonEventBridgeFullAccess"
-    echo "  - IAMFullAccess (or permissions to create Lambda execution role)"
-    echo "  - AmazonS3FullAccess"
-    echo "  Then re-run: ./infra/deploy.sh"
 fi

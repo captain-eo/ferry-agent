@@ -15,7 +15,7 @@ Parameters:
     Description: Gemini model variant to use.
   ScheduleCron:
     Type: String
-    Default: "rate(4 minutes)"
+    Default: "rate(15 minutes)"
     Description: EventBridge invocation schedule (e.g. rate(4 minutes)).
 
 Resources:
@@ -118,6 +118,33 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt ScheduleRule.Arn
 
+  # Lambda Function URL for direct on-demand AIS map telemetry
+  FerryTrackerFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt FerryTrackerFunction.Arn
+      Cors:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+        AllowHeaders:
+          - Content-Type
+          - X-Amz-Date
+          - Authorization
+          - X-Api-Key
+        MaxAge: 300
+
+  # Permission allowing public access to the Function URL
+  FerryTrackerFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FerryTrackerFunction
+      Action: 'lambda:InvokeFunctionUrl'
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
 Outputs:
   WebsiteURL:
     Description: "Public URL for the Vashon School Ferry Commute Tracker"
@@ -131,3 +158,6 @@ Outputs:
   LambdaFunctionArn:
     Description: "Lambda Function ARN"
     Value: !GetAtt FerryTrackerFunction.Arn
+  TelemetryApiUrl:
+    Description: "Public Lambda Function URL for on-demand map telemetry polling"
+    Value: !GetAtt FerryTrackerFunctionUrl.FunctionUrl

@@ -1,12 +1,12 @@
 """
 AWS Lambda Handler for Fauntleroy-Vashon School Ferry Tracker.
-Executes periodic pipeline: WSDOT Ingestion -> Gemini Flash Analysis -> S3 Static Deployment.
+Executes scheduled pipeline on EventBridge trigger (every 15 minutes):
+WSDOT Ingestion -> Gemini Flash / Heuristic Analysis -> S3 Static Deployment.
 
 Features:
-1. Commute-Hours Governor: Runs frequent updates (e.g. every 4m) during school commute windows
-   (Mon-Fri 6:00-9:15 AM & 2:30-6:00 PM PT), and throttles to once-an-hour during off-peak times.
-2. AI Invocation Throttling: Reuses cached Gemini advisory across invocations unless bulletins,
-   schedules, or route operating modes change.
+1. Fast-Path HTTP: Serves on-demand AIS boat telemetry for browser maps via Lambda Function URL (<150ms).
+2. Scheduled Pipeline: Executes directly every time EventBridge cron triggers it (every 15 minutes).
+3. AI Throttling: Reuses cached Gemini advisory across invocations unless bulletins or schedules change.
 """
 
 import json
@@ -24,8 +24,8 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 import boto3
-from src.config import S3_BUCKET_NAME, COMMUTE_SCHEDULE
-from src.collectors.wsdot_api import get_merged_ferry_telemetry
+from src.config import S3_BUCKET_NAME, VESSELS_API_URL
+from src.collectors.wsdot_api import get_merged_ferry_telemetry, fetch_enriched_triangle_vessels
 from src.collectors.bulletin_scraper import scrape_bulletins
 from src.analyzer.gemini_analyzer import analyze_commute_with_gemini
 from src.generator.site_generator import generate_static_site
@@ -34,94 +34,86 @@ LOCAL_TMP_DIR = "/tmp/vashon_ferry_dist"
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 
-def is_school_commute_window(now_dt: datetime) -> Tuple[bool, str]:
-    """
-    Checks if current Pacific time is in the morning or afternoon school commute window.
-    Morning: Monday-Friday 6:00 AM - 9:15 AM
-    Afternoon / Sports: Monday-Friday 2:30 PM - 6:00 PM
-    """
-    # 0 = Monday, 4 = Friday, 5 = Saturday, 6 = Sunday
-    if now_dt.weekday() > 4:
-        return False, "Weekend (Off-Peak)"
-        
-    current_minutes = now_dt.hour * 60 + now_dt.minute
-    am_start = COMMUTE_SCHEDULE["am_start"][0] * 60 + COMMUTE_SCHEDULE["am_start"][1] # 06:00
-    am_end = COMMUTE_SCHEDULE["am_end"][0] * 60 + COMMUTE_SCHEDULE["am_end"][1]       # 09:15
-    pm_start = COMMUTE_SCHEDULE["pm_start"][0] * 60 + COMMUTE_SCHEDULE["pm_start"][1] # 14:30
-    pm_end = COMMUTE_SCHEDULE["pm_end"][0] * 60 + COMMUTE_SCHEDULE["pm_end"][1]       # 18:00
-
-    if am_start <= current_minutes <= am_end:
-        return True, "Morning Commute (Peak)"
-    if pm_start <= current_minutes <= pm_end:
-        return True, "Afternoon / Sports Return (Peak)"
-        
-    return False, "Midday / Evening (Off-Peak)"
+def is_http_request(event: Dict[str, Any]) -> bool:
+    """Checks whether the event originates from an HTTP request (Lambda Function URL or API Gateway)."""
+    if not isinstance(event, dict):
+        return False
+    if "requestContext" in event and ("http" in event["requestContext"] or "httpMethod" in event.get("requestContext", {})):
+        return True
+    if "rawPath" in event or "httpMethod" in event:
+        return True
+    return False
 
 
-def check_offpeak_should_run(s3_client, bucket_name: str, now_dt: datetime) -> Tuple[bool, float]:
+def handle_http_telemetry_request(event: Dict[str, Any]) -> Dict[str, Any]:
     """
-    For off-peak times, checks whether we should run the scheduled refresh.
-    Default interval is 15 minutes.
-    Returns (should_run, minutes_since_last_update).
+    Handles fast on-demand HTTP requests from Lambda Function URL for real-time AIS map polling.
+    Bypasses AI analysis, scraping, and S3 uploads to return live boat telemetry in <150ms.
     """
-    if not bucket_name or bucket_name == "vashon-ferry-commute":
-        return True, 999.0
+    http_ctx = event.get("requestContext", {}).get("http", {})
+    method = http_ctx.get("method") or event.get("httpMethod", "GET")
+    method = (method or "GET").upper()
 
-    target_interval = COMMUTE_SCHEDULE.get("offpeak_interval_minutes", 15)
-    # Allow a 2-minute buffer so e.g. a 4-minute cron fires smoothly around ~13-16 minutes
-    threshold_minutes = max(1.0, float(target_interval - 2))
+    # AWS Lambda Function URL automatically injects Access-Control-* headers
+    # based on its infrastructure CORS configuration. Application code must not
+    # return duplicate Access-Control-* headers to prevent multiple-value CORS browser errors.
+    response_headers = {
+        "Content-Type": "application/json",
+        "Cache-Control": "max-age=5, public"
+    }
+
+    if method == "OPTIONS":
+        return {
+            "statusCode": 204,
+            "headers": response_headers,
+            "body": ""
+        }
+
+    raw_path = event.get("rawPath") or event.get("path", "")
+    print(f"[HTTP-API] Received {method} request for '{raw_path}'")
+    start_time = time.time()
 
     try:
-        head_res = s3_client.head_object(Bucket=bucket_name, Key="data.json")
-        last_modified = head_res.get("LastModified")
-        if last_modified:
-            now_utc = datetime.now(timezone.utc)
-            elapsed_minutes = (now_utc - last_modified).total_seconds() / 60.0
-            if elapsed_minutes < threshold_minutes:
-                return False, elapsed_minutes
-            return True, elapsed_minutes
-    except Exception:
-        # If file doesn't exist yet, proceed with run
-        return True, 999.0
-
-    return True, 999.0
+        vessels = fetch_enriched_triangle_vessels()
+        now_pacific = datetime.now(PACIFIC_TZ)
+        payload = {
+            "timestamp": now_pacific.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "timestamp_epoch": time.time(),
+            "vessels_telemetry": vessels,
+            "vessels": vessels,
+            "count": len(vessels),
+            "latency_ms": round((time.time() - start_time) * 1000, 1)
+        }
+        return {
+            "statusCode": 200,
+            "headers": response_headers,
+            "body": json.dumps(payload)
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed serving HTTP vessel telemetry: {e}")
+        return {
+            "statusCode": 500,
+            "headers": response_headers,
+            "body": json.dumps({"error": f"Failed fetching vessel telemetry: {str(e)}"})
+        }
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Main AWS Lambda entrypoint invoked by EventBridge cron or manual test.
+    Main AWS Lambda entrypoint invoked by EventBridge cron, Lambda Function URL, or manual test.
+    Executes directly every time EventBridge triggers it.
     """
-    print("[INFO] Lambda execution started.")
-    now_pacific = datetime.now(PACIFIC_TZ)
-    bucket_name = os.getenv("S3_BUCKET_NAME", S3_BUCKET_NAME)
-    force_run = event.get("force", False) or os.getenv("FORCE_RUN", "false").lower() == "true"
-    
-    # 1. Evaluate Commute Hours Governor
-    is_commute, commute_label = is_school_commute_window(now_pacific)
-    print(f"[SCHEDULE] Time: {now_pacific.strftime('%A %I:%M %p %Z')} | Status: {commute_label} (In-Commute: {is_commute})")
-    
-    s3 = boto3.client("s3")
-    
-    if not is_commute and not force_run:
-        should_run, elapsed_mins = check_offpeak_should_run(s3, bucket_name, now_pacific)
-        target_interval = COMMUTE_SCHEDULE.get("offpeak_interval_minutes", 15)
-        if not should_run:
-            msg = f"Off-peak window; last update was {elapsed_mins:.1f} minutes ago. Throttled to ~{target_interval}m refresh."
-            print(f"[INFO] {msg}")
-            return {
-                "statusCode": 200,
-                "body": json.dumps({
-                    "status": "skipped_offpeak_throttle",
-                    "message": msg,
-                    "schedule_label": commute_label,
-                    "target_interval_minutes": target_interval,
-                    "next_scheduled_run": f"in ~{max(1, round(target_interval - elapsed_mins))} minutes"
-                })
-            }
-        else:
-            print(f"[INFO] Off-peak {target_interval}m tick triggered (elapsed: {elapsed_mins:.1f} mins).")
+    # 0. Fast-path: On-demand HTTP AIS polling for the JavaScript map
+    if is_http_request(event):
+        return handle_http_telemetry_request(event)
 
-    # 2. Try to fetch previous AI state from S3 to avoid cold-start LLM invocations
+    print("[INFO] Lambda scheduled pipeline execution started.")
+    now_pacific = datetime.now(PACIFIC_TZ)
+    print(f"[SCHEDULE] Execution Time: {now_pacific.strftime('%A %I:%M %p %Z')}")
+    bucket_name = os.getenv("S3_BUCKET_NAME", S3_BUCKET_NAME)
+    s3 = boto3.client("s3")
+
+    # 1. Try to fetch previous AI state from S3 to avoid cold-start LLM invocations
     cached_ai_state = None
     if bucket_name and bucket_name != "vashon-ferry-commute":
         try:
@@ -139,12 +131,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # 3. Ingest telemetry & bulletins
+    # 2. Ingest telemetry & bulletins
     print("[INFO] Ingesting WSDOT telemetry and bulletins...")
     telemetry = get_merged_ferry_telemetry()
     bulletins = scrape_bulletins()
     
-    # 4. Run Gemini Flash analysis (with state fingerprinting & caching)
+    # 3. Run Gemini Flash analysis (with state fingerprinting & caching)
     force_ai = event.get("force_ai", False)
     analysis = analyze_commute_with_gemini(
         telemetry=telemetry,
@@ -152,11 +144,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         cached_ai_state=cached_ai_state,
         force_ai_refresh=force_ai
     )
-    analysis["commute_window_label"] = commute_label
-    analysis["is_commute_window"] = is_commute
     analysis["timestamp_epoch"] = time.time()
     
-    # 5. Generate static site files
+    # 4. Generate static site files
     print(f"[INFO] Rendering static site into {LOCAL_TMP_DIR}...")
     files = generate_static_site(analysis, LOCAL_TMP_DIR)
     
@@ -215,7 +205,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "body": json.dumps({
             "message": "Ferry commute update completed successfully.",
             "schedule_mode": analysis.get("schedule_mode"),
-            "commute_window": commute_label,
+            "service_status": analysis.get("service_status"),
+            "cancelled_vessels": analysis.get("cancelled_vessels"),
             "ai_provider": analysis.get("ai_provider"),
             "ai_cached": analysis.get("ai_cached", False),
             "s3_uploaded": uploaded,
