@@ -8,10 +8,10 @@ preventing historical weekend notices from mischaracterizing weekday service.
 
 import re
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
-from src.config import WSDOT_BULLETIN_URL, WSDOT_ADDS_CANCELS_URL, WSDOT_SCHEDULE_DETAIL_URL
+from src.config import WSDOT_BULLETIN_URL, WSDOT_ADDS_CANCELS_URL, WSDOT_SCHEDULE_DETAIL_URL, PACIFIC_TZ
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
@@ -211,15 +211,35 @@ def scrape_bulletins(timeout: int = 10) -> Dict[str, Any]:
             }
             
             # Check relevance to Fauntleroy / Vashon / Southworth / Triangle
-            search_corpus = f"{title_text} {content_text}".lower()
-            keywords = [
-                "fauntleroy", "faunt", "vashon", "southworth", "triangle",
-                "f-v-s", "f/v/s", "fvs", "route 14", "route #14",
-                "sealth", "kitsap", "kittitas", "cathlamet", "issaquah", "chelan",
-                "point defiance", "pt defiance", "pt. defiance", "tahlequah", "pd/tah", "pd-tah",
-                "all routes", "system-wide", "systemwide"
+            title_lower = title_text.lower().strip()
+            content_lower = content_text.lower()
+            search_corpus = f"{title_lower} {content_lower}"
+
+            # Routes that are explicitly NOT Fauntleroy / Vashon / Southworth
+            other_route_prefixes = [
+                "ana/sjs", "anacortes", "muk/clin", "mukilteo", "sea/brem", "brem/sea",
+                "pt/coup", "coupe/pt", "edm/king", "edmonds", "kingston", "sea/bi",
+                "bain/sea", "bainbridge", "seattle/bainbridge", "seattle/bremerton"
             ]
-            if any(k in search_corpus for k in keywords):
+            is_other_route = any(
+                title_lower.startswith(r) or title_lower.startswith(f"{r} ") 
+                or title_lower.startswith(f"{r}-") or title_lower.startswith(f"{r} -") 
+                for r in other_route_prefixes
+            )
+
+            # Triangle Route explicit mentions
+            explicit_triangle = any(
+                k in search_corpus 
+                for k in ["fauntleroy", "faunt", "vashon", "southworth", "triangle", "f-v-s", "f/v/s", "fvs", "route 14", "route #14"]
+            )
+            # System-wide alerts that impact all routes
+            systemwide = any(
+                k in search_corpus 
+                for k in ["all routes", "system-wide", "systemwide", "routes may be out of service", "crewing openings on several routes"]
+            )
+
+            # Only mark as Triangle Route if explicitly relevant and not a distinct other route
+            if (explicit_triangle or systemwide) and (not is_other_route or explicit_triangle):
                 bulletin_obj["is_triangle_route"] = True
                 
             bulletins.append(bulletin_obj)
@@ -241,87 +261,96 @@ def scrape_bulletins(timeout: int = 10) -> Dict[str, Any]:
         disruption_reason = ""
         mode_reason = "Operating on normal three-boat schedule."
         
-        # Determine current status from newest relevant bulletins
+        two_boat_phrases = [
+            "two-boat schedule", "2-boat schedule", "two boat schedule", "2 boat schedule",
+            "reduced to two boats", "reduced from three boats to two boats",
+            "reduced to 2 boats", "reduced from 3 boats to 2 boats",
+            "operating on two-boat", "operating on 2-boat",
+            "operating on two boat", "operating on 2 boat",
+            "route is on a two-boat", "route is on a 2-boat",
+            "two-boat contingency", "2-boat contingency"
+        ]
+
+        # 1. First, check all triangle bulletins for official 2-boat schedule declarations
         for b in triangle_bulletins:
             text = f"{b['title']} {b['content']}".lower()
-            
-            # Check for vessel restoration / return to 3-boat schedule
-            is_restoration = any(kw in text for kw in [
-                "back in service", "returned to service", "return to service",
-                "filled the previously open position", "route back to three-boat schedule",
-                "route back to 3-boat schedule", "back on the three-boat schedule",
-                "back on the 3-boat schedule"
-            ])
-            if is_restoration:
-                for v in KNOWN_VESSELS:
-                    if f"{v} back in service" in text or f"{v} will start" in text or f"{v} returned" in text or f"{v} starts" in text:
-                        restored_vessels.append(v.capitalize())
-                if "#3" in text and ("back in service" in text or "filled" in text or "start on" in text):
-                    restored_vessels.append("Sealth")
-                if not restored_vessels and "sealth" in text:
-                    restored_vessels.append("Sealth")
-                if any(kw in text for kw in ["return to three-boat", "route back to three-boat", "back on the three-boat"]):
+            is_fvs_route = any(kw in text for kw in ["fauntleroy", "faunt", "vashon", "southworth", "triangle", "f-v-s", "f/v/s", "route 14"])
+            if is_fvs_route and any(kw in text for kw in two_boat_phrases):
+                detected_mode = "2-boat"
+                mode_reason = f"Notice: {b['title']}"
+                break
+
+        # 2. Check for route-wide suspension or entire route out of service
+        is_route_out_of_service = False
+        for b in triangle_bulletins:
+            text = f"{b['title']} {b['content']}".lower()
+            is_fvs = any(kw in text for kw in ["fauntleroy", "faunt", "vashon", "southworth", "triangle", "f-v-s", "f/v/s", "route 14"])
+            if is_fvs and any(kw in text for kw in [
+                "route is out of service", "route out of service",
+                "service is suspended", "service suspended",
+                "all sailings cancelled", "all sailings are cancelled",
+                "out of service due to a shortage of crew", "out of service due to shortage of crew"
+            ]):
+                is_route_out_of_service = True
+                service_status = "route_out_of_service"
+                disruption_reason = "Shortage of crew (all sailings suspended)" if ("shortage of crew" in text or "lack of crew" in text) else "Route out of service"
+                mode_reason = f"Alert: {b['title']}"
+                # If entire route is out of service, all scheduled triangle vessels are impacted
+                cancelled_vessels = ["Cathlamet", "Kittitas"]
+                break
+
+        # 3. If not fully suspended, check for specific vessel cancellations and restorations
+        if not is_route_out_of_service:
+            for b in triangle_bulletins:
+                text = f"{b['title']} {b['content']}".lower()
+                
+                # Check for vessel restoration / return to normal schedule
+                is_restoration = any(kw in text for kw in [
+                    "back in service", "returned to service", "return to service",
+                    "filled the previously open position", "route back to three-boat schedule",
+                    "route back to 3-boat schedule", "back on the three-boat schedule",
+                    "back on the 3-boat schedule"
+                ])
+                if is_restoration:
+                    for v in KNOWN_VESSELS:
+                        if f"{v} back in service" in text or f"{v} will start" in text or f"{v} returned" in text or f"{v} starts" in text:
+                            restored_vessels.append(v.capitalize())
+                    if "#3" in text and ("back in service" in text or "filled" in text or "start on" in text):
+                        restored_vessels.append("Sealth")
+                    if not restored_vessels and "sealth" in text:
+                        restored_vessels.append("Sealth")
+                    if any(kw in text for kw in ["return to three-boat", "route back to three-boat", "back on the three-boat"]):
+                        detected_mode = "3-boat"
+                        service_status = "normal"
+                        mode_reason = f"Notice: {b['title']}"
+
+                # Check for crew shortage / cancelled sailings
+                is_crew_shortage = "shortage of crew" in text or "lack of crew" in text or "crew shortage" in text
+                is_cancelled = "cancelled sailings" in text or "cancels all the #" in text or "out of service until a relief" in text
+                
+                if is_crew_shortage or is_cancelled:
+                    bulletin_cancelled = _extract_cancelled_vessels(f"{b['title']} {b['content']}")
+                    unrestored_vessels = [v for v in bulletin_cancelled if v not in restored_vessels]
+                    
+                    if unrestored_vessels:
+                        service_status = "cancelled_sailings"
+                        disruption_reason = "Shortage of crew (relief pending)" if is_crew_shortage else "Cancelled sailings"
+                        for v in unrestored_vessels:
+                            if v not in cancelled_vessels:
+                                cancelled_vessels.append(v)
+                        if "#3" in text and "Sealth" in unrestored_vessels:
+                            cancelled_boat_numbers.append("#3")
+                        mode_reason = f"Alert: {b['title']}"
+                        break
+                    
+                # Check for return to 3-boat schedule announcement
+                if "return to three-boat schedule" in text or "return to 3-boat schedule" in text:
                     detected_mode = "3-boat"
                     service_status = "normal"
                     mode_reason = f"Notice: {b['title']}"
 
-            # Check for crew shortage / cancelled sailings
-            is_crew_shortage = "shortage of crew" in text or "lack of crew" in text or "crew shortage" in text
-            is_cancelled = "cancelled sailings" in text or "cancels all the #" in text or "out of service until a relief" in text
-            
-            if is_crew_shortage or is_cancelled:
-                bulletin_cancelled = _extract_cancelled_vessels(f"{b['title']} {b['content']}")
-                # If these vessels were already restored by a newer bulletin, don't re-cancel them
-                unrestored_vessels = [v for v in bulletin_cancelled if v not in restored_vessels]
-                
-                if unrestored_vessels:
-                    # Crucial check: Does route continue on 3-boat schedule for remaining boats?
-                    if "continue to operate on 3-boat schedule" in text or "continue to operate on three-boat schedule" in text or "operate on 3-boat schedule" in text or "operate on three-boat schedule" in text:
-                        detected_mode = "3-boat"
-                    else:
-                        if "operating on two-boat schedule" not in text and "operating on 2-boat schedule" not in text:
-                            detected_mode = "3-boat"
-                        else:
-                            detected_mode = "2-boat"
-                    
-                    service_status = "cancelled_sailings"
-                    disruption_reason = "Shortage of crew (relief pending)" if is_crew_shortage else "Cancelled sailings"
-                    for v in unrestored_vessels:
-                        if v not in cancelled_vessels:
-                            cancelled_vessels.append(v)
-                    if "#3" in text and "Sealth" in unrestored_vessels:
-                        cancelled_boat_numbers.append("#3")
-                    mode_reason = f"Alert: {b['title']}"
-                    break
-                
-            # Check for official 2-boat schedule announcement
-            is_fvs_route = any(kw in text for kw in ["fauntleroy", "faunt", "vashon", "southworth", "triangle", "f-v-s", "f/v/s", "route 14"])
-            two_boat_phrases = [
-                "two-boat schedule", "2-boat schedule", "two boat schedule", "2 boat schedule",
-                "reduced to two boats", "reduced from three boats to two boats",
-                "reduced to 2 boats", "reduced from 3 boats to 2 boats",
-                "operating on two-boat", "operating on 2-boat",
-                "operating on two boat", "operating on 2 boat",
-                "route is on a two-boat", "route is on a 2-boat",
-                "two-boat contingency", "2-boat contingency"
-            ]
-            if is_fvs_route and any(kw in text for kw in two_boat_phrases):
-                if not is_restoration:
-                    detected_mode = "2-boat"
-                    service_status = "reduced_2boat"
-                    disruption_reason = "Two-boat contingency schedule"
-                    mode_reason = f"Alert: {b['title']}"
-                    break
-                
-            # Check for return to 3-boat schedule announcement
-            if "return to three-boat schedule" in text or "return to 3-boat schedule" in text or "three-boat schedule" in text:
-                detected_mode = "3-boat"
-                service_status = "normal"
-                mode_reason = f"Notice: {b['title']}"
-
         # Detect Monday's schedule mode & cancellation status specifically (essential for weekend lookahead)
-        from datetime import timezone, timedelta
-        pacific_now = datetime.now(timezone(timedelta(hours=-7)))
+        pacific_now = datetime.now(PACIFIC_TZ)
         weekday = pacific_now.weekday()
         is_weekend = (weekday in (5, 6) or (weekday == 4 and pacific_now.hour >= 19))
 
@@ -391,8 +420,7 @@ def scrape_bulletins(timeout: int = 10) -> Dict[str, Any]:
         cancellations_data = fetch_route_cancellations(timeout=timeout)
         cancels_by_date = cancellations_data.get("cancellations_by_date", {})
         
-        from datetime import timezone, timedelta
-        pacific_now = datetime.now(timezone(timedelta(hours=-7)))
+        pacific_now = datetime.now(PACIFIC_TZ)
         current_hhmm = f"{pacific_now.hour:02d}:{pacific_now.minute:02d}"
         today_cancels = _match_date_cancels(cancels_by_date, pacific_now)
         exact_cancelled_f_to_v = [t["time_hhmm"] for t in today_cancels.get("fauntleroy_cancelled", [])]

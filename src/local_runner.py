@@ -18,8 +18,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from src.config import ENABLE_AI_SUMMARY
 from src.collectors.wsdot_api import get_merged_ferry_telemetry
 from src.collectors.bulletin_scraper import scrape_bulletins
+from src.analyzer.heuristic_analyzer import evaluate_commute
 from src.analyzer.gemini_analyzer import analyze_commute_with_gemini
 from src.generator.site_generator import generate_static_site
 
@@ -36,13 +38,20 @@ def run_pipeline(api_key: str = None, model: str = None, s3_bucket: str = None):
     print(f"📊 Mode detected: {bulletins.get('schedule_mode')} (status: {bulletins.get('service_status')}, cancelled: {bulletins.get('cancelled_vessels')})")
     print(f"🚢 Vessels on route: {len(telemetry.get('vessels', []))}")
     
-    print("🤖 Running AI analysis (Gemini Flash / Heuristic fallback)...")
-    analysis = analyze_commute_with_gemini(
-        telemetry=telemetry,
-        bulletins_data=bulletins,
-        api_key=api_key,
-        model_name=model
-    )
+    if ENABLE_AI_SUMMARY:
+        print("🤖 Running AI analysis (Gemini Flash)...")
+        analysis = analyze_commute_with_gemini(
+            telemetry=telemetry,
+            bulletins_data=bulletins,
+            api_key=api_key,
+            model_name=model
+        )
+    else:
+        print("📊 Running deterministic heuristic analysis (AI summary disabled)...")
+        analysis = evaluate_commute(telemetry=telemetry, bulletins_data=bulletins)
+        analysis["ai_provider"] = "deterministic_heuristic_engine"
+        analysis["ai_model"] = "Heuristic Engine"
+        analysis["ai_cached"] = False
     
     print(f"⚙️ Generating static 1-page site in {DIST_DIR}...")
     files = generate_static_site(analysis, str(DIST_DIR))

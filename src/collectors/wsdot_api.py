@@ -17,6 +17,7 @@ from src.config import (
     TERMINAL_FAUNTLEROY_ID,
     TERMINAL_VASHON_ID,
     OP_ROUTE_FVS,
+    PACIFIC_TZ,
 )
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -33,8 +34,8 @@ def parse_dot_net_date(raw: Optional[str]) -> Optional[str]:
         ms = int(match.group(1))
         offset_str = match.group(2)
         
-        # Default Pacific offset (-07:00 / -08:00)
-        tz = timezone(timedelta(hours=-7))
+        # Default Pacific offset
+        tz = PACIFIC_TZ
         if offset_str:
             hours = int(offset_str[:3])
             mins = int(offset_str[0] + offset_str[3:])
@@ -70,7 +71,7 @@ def get_target_school_commute_date(dt: Optional[datetime] = None) -> Dict[str, A
       - Saturday -> Monday (+2 days)
       - Sunday -> Monday (+1 day)
     """
-    now = dt or datetime.now(timezone(timedelta(hours=-7)))
+    now = dt or datetime.now(PACIFIC_TZ)
     weekday = now.weekday()
     hour = now.hour
     is_after_7pm = (hour >= 19)
@@ -266,7 +267,7 @@ def get_merged_ferry_telemetry(date_str: Optional[str] = None, simulated_time: O
     vessels = fetch_enriched_triangle_vessels()
     schedule = fetch_today_schedule(sched_date)
             
-    pacific_now = simulated_time or datetime.now(timezone(timedelta(hours=-7)))
+    pacific_now = simulated_time or datetime.now(PACIFIC_TZ)
     
     return {
         "timestamp": pacific_now.strftime("%Y-%m-%dT%H:%M:%S%z"),

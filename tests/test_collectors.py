@@ -177,6 +177,7 @@ class TestFerryCommutePipeline(unittest.TestCase):
         with patch("src.lambda_handler.get_merged_ferry_telemetry", return_value={"vessels": [], "schedule": {}}), \
              patch("src.lambda_handler.scrape_bulletins", return_value={"schedule_mode": "3-boat"}), \
              patch("src.lambda_handler.analyze_commute_with_gemini", return_value=dummy_analysis), \
+             patch("src.lambda_handler.evaluate_commute", return_value=dummy_analysis), \
              patch("src.lambda_handler.generate_static_site", return_value={"index_html": "/tmp/test.html", "data_json": "/tmp/test.json"}):
             
             resp = lambda_handler({}, None)
@@ -184,6 +185,21 @@ class TestFerryCommutePipeline(unittest.TestCase):
             body = json.loads(resp["body"])
             self.assertEqual(body["schedule_mode"], "3-boat")
             self.assertIn("Ferry commute update completed successfully", body["message"])
+
+    def test_heuristic_summary_when_ai_disabled(self):
+        """Verifies that heuristic summary is used and AI is bypassed when ENABLE_AI_SUMMARY is False."""
+        from src.analyzer.gemini_analyzer import analyze_commute_with_gemini
+        from unittest.mock import patch
+
+        telemetry = {"vessels": [], "schedule": {}}
+        bulletins = {"triangle_bulletins": [], "schedule_mode": "3-boat", "service_status": "normal"}
+
+        with patch("urllib.request.urlopen") as mock_url:
+            res = analyze_commute_with_gemini(telemetry, bulletins, api_key="dummy_key")
+            mock_url.assert_not_called()
+            self.assertEqual(res["ai_provider"], "deterministic_heuristic_engine")
+            self.assertEqual(res["ai_model"], "Heuristic Engine")
+            self.assertTrue(len(res["executive_briefing"]) > 0)
 
     def test_ai_state_fingerprinting_and_cache(self):
         from src.analyzer.gemini_analyzer import compute_schedule_state_fingerprint
@@ -1063,6 +1079,123 @@ class TestFerryCommutePipeline(unittest.TestCase):
             self.assertEqual(res["monday_schedule_mode"], "2-boat")
             self.assertEqual(res["monday_service_status"], "reduced_2boat")
             self.assertIn("Two-boat schedule", res["monday_mode_reason"])
+
+    def test_vessels_api_url_propagation(self):
+        """Tests that VESSELS_API_URL is properly included in analysis output."""
+        import os
+        from unittest.mock import patch
+        from src.analyzer.heuristic_analyzer import evaluate_commute
+
+        dummy_telemetry = {"vessels": [], "schedule": {"fauntleroy_to_vashon": [], "vashon_to_fauntleroy": []}}
+        dummy_bulletins = {"schedule_mode": "3-boat", "triangle_bulletins": []}
+
+        with patch.dict(os.environ, {"VESSELS_API_URL": "https://test-api.execute-api.us-west-2.amazonaws.com/vessels"}):
+            import importlib
+            import src.config
+            importlib.reload(src.config)
+            import src.analyzer.heuristic_analyzer
+            importlib.reload(src.analyzer.heuristic_analyzer)
+
+            eval_res = src.analyzer.heuristic_analyzer.evaluate_commute(dummy_telemetry, dummy_bulletins)
+            self.assertEqual(eval_res.get("vessels_api_url"), "https://test-api.execute-api.us-west-2.amazonaws.com/vessels")
+
+            # Clean up reload
+            importlib.reload(src.config)
+            importlib.reload(src.analyzer.heuristic_analyzer)
+
+    def test_other_route_bulletin_exclusion(self):
+        """Verifies that bulletins starting with other route prefixes (e.g. Ana/SJs, Muk/Clin) are not treated as Triangle."""
+        from unittest.mock import patch
+        from src.collectors.bulletin_scraper import scrape_bulletins
+
+        html = """
+        <html>
+        <body>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinDate_0">[Last Updated: Monday, October 5, 2026 6:00 AM]</span>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinTitle_0">Ana/SJs - Update:Cancelled sailings for Monday, 10/05, due to the lack of crew</span>
+            <span id="cphPageTemplate_rprBulletins_lblContent_0">For Monday, October 5, Vessel #1 Chelan and #2 Yakima will be out of service due to the lack of crew.</span>
+            
+            <span id="cphPageTemplate_rprBulletins_lblBulletinDate_1">[Last Updated: Monday, October 5, 2026 6:10 AM]</span>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinTitle_1">Edm/King - Service suspended overnight Oct. 6-7 for BNSF railroad work</span>
+            <span id="cphPageTemplate_rprBulletins_lblContent_1">Consider Kitsap Transit for travel between Kingston and Seattle.</span>
+        </body>
+        </html>
+        """
+        class MockResp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+            def read(self):
+                return html.encode("utf-8")
+
+        monday_dt = datetime(2026, 10, 5, 7, 0, tzinfo=timezone(timedelta(hours=-7)))
+        with patch("urllib.request.urlopen", return_value=MockResp()), \
+             patch("src.collectors.bulletin_scraper.datetime") as mock_dt:
+            mock_dt.now.return_value = monday_dt
+            mock_dt.strptime = datetime.strptime
+            mock_dt.min = datetime.min
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            res = scrape_bulletins()
+            self.assertEqual(len(res["triangle_bulletins"]), 0)
+            self.assertNotIn("Chelan", res["cancelled_vessels"])
+
+    def test_route_out_of_service_detection(self):
+        """Verifies that full route shutdown is detected and displayed accurately."""
+        from unittest.mock import patch
+        from src.collectors.bulletin_scraper import scrape_bulletins
+        from src.analyzer.heuristic_analyzer import evaluate_commute
+
+        html = """
+        <html>
+        <body>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinDate_0">[Last Updated: Monday, October 5, 2026 6:30 AM]</span>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinTitle_0">Faunt/Va/SW - Update - Route out of service due to shortage of crew, 10/5</span>
+            <span id="cphPageTemplate_rprBulletins_lblContent_0">Due to a shortage of crew, the Fauntleroy/Vashon/Southworth route is out of service. Dispatch continues to try and fill open positions.</span>
+        </body>
+        </html>
+        """
+        class MockResp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+            def read(self):
+                return html.encode("utf-8")
+
+        monday_dt = datetime(2026, 10, 5, 7, 0, tzinfo=timezone(timedelta(hours=-7)))
+        with patch("urllib.request.urlopen", return_value=MockResp()), \
+             patch("src.collectors.bulletin_scraper.datetime") as mock_dt:
+            mock_dt.now.return_value = monday_dt
+            mock_dt.strptime = datetime.strptime
+            mock_dt.min = datetime.min
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            b_res = scrape_bulletins()
+            self.assertEqual(b_res["service_status"], "route_out_of_service")
+            self.assertEqual(len(b_res["triangle_bulletins"]), 1)
+
+            dummy_telemetry = {
+                "vessels": [],
+                "schedule": {
+                    "fauntleroy_to_vashon": [
+                        {"time_hhmm": "06:45", "vessel_name": "Kittitas"},
+                        {"time_hhmm": "08:15", "vessel_name": "Cathlamet"}
+                    ],
+                    "vashon_to_fauntleroy": []
+                }
+            }
+            eval_res = evaluate_commute(dummy_telemetry, b_res, simulated_time=monday_dt)
+            self.assertEqual(eval_res["schedule_mode"], "2-boat")
+            self.assertEqual(eval_res["service_status"], "route_out_of_service")
+            self.assertIn("2-Boat (Route Out of Service", eval_res["mode_display"])
+            self.assertIn("Route Out of Service", eval_res["executive_briefing"])
+            
+            # Verify sailings are cancelled
+            for k, target in eval_res["am_commute"]["evaluated_targets"].items():
+                self.assertTrue(target["is_cancelled"])
+                self.assertEqual(target["catchability"], "MISSED")
 
 
 if __name__ == "__main__":

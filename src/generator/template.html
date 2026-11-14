@@ -140,7 +140,7 @@
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between gap-2 mb-1">
               <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Live Commute Advisory</span>
-              <span id="ai-model-tag" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono">Gemini Flash</span>
+              <span id="ai-model-tag" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono">Heuristic Engine</span>
             </div>
             <div id="ai-briefing-content" class="text-xs sm:text-sm text-slate-200 leading-relaxed font-normal">
               <!-- Injected 1-2 sentence briefing -->
@@ -449,7 +449,7 @@
     // In 2-boat schedule mode, 7:20 AM is already the primary designated school boat; suppress ghost boat card.
     // In 3-boat mode, suppress stale build-time vessel positions and ghost boat until first live AIS query completes.
     if (currentData && currentData.am_commute && currentData.am_commute.evaluated_targets && currentData.am_commute.evaluated_targets.ghost_ferry) {
-      if (currentData.schedule_mode === '2-boat') {
+      if (currentData.schedule_mode === '2-boat' || currentData.service_status === 'route_out_of_service' || currentData.service_status === 'suspended') {
         delete currentData.am_commute.evaluated_targets.ghost_ferry;
       } else {
         currentData.am_commute.evaluated_targets.ghost_ferry.is_detected = false;
@@ -573,6 +573,85 @@
     }
 
     // Telemetry Freshness & Timestamp Helpers
+    function parseDotNetDate(raw) {
+      if (!raw || typeof raw !== 'string') return null;
+      const match = /\/Date\((\d+)([+-]\d{4})?\)\//.exec(raw);
+      if (!match) return null;
+      const ms = parseInt(match[1], 10);
+      return new Date(ms).toISOString();
+    }
+
+    function parseTimeHhmm(raw) {
+      if (!raw) return null;
+      if (typeof raw === 'string' && raw.startsWith('/Date(')) {
+        const match = /\/Date\((\d+)([+-]\d{4})?\)\//.exec(raw);
+        if (match) {
+          const ms = parseInt(match[1], 10);
+          return new Date(ms).toLocaleTimeString('en-US', {
+            timeZone: 'America/Los_Angeles',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          });
+        }
+      }
+      if (typeof raw === 'string' && raw.includes('T')) {
+        return raw.split('T')[1].substring(0, 5);
+      }
+      return typeof raw === 'string' ? raw.substring(0, 5) : null;
+    }
+
+    function parseRawWsdotVessels(data) {
+      if (!Array.isArray(data)) return [];
+      const triangleVessels = [];
+      const OP_ROUTE_FVS = 'f-v-s';
+
+      for (const v of data) {
+        const routes = (v.OpRouteAbbrev || []).map(r => String(r).toLowerCase());
+        const depTerm = (v.DepartingTerminalName || '').toLowerCase();
+        const arrTerm = (v.ArrivingTerminalName || '').toLowerCase();
+
+        const isTriangle = routes.includes(OP_ROUTE_FVS) ||
+          ['fauntleroy', 'vashon', 'southworth'].some(t => depTerm.includes(t)) ||
+          ['fauntleroy', 'vashon', 'southworth'].some(t => arrTerm.includes(t));
+
+        if (!isTriangle) continue;
+
+        let tsIso = null;
+        if (v.TimeStamp) {
+          const match = /\/Date\((\d+)/.exec(v.TimeStamp);
+          if (match) {
+            tsIso = new Date(parseInt(match[1], 10)).toISOString();
+          }
+        }
+
+        triangleVessels.push({
+          vessel_id: v.VesselID,
+          name: v.VesselName,
+          mmsi: v.Mmsi,
+          in_service: v.InService !== false,
+          at_dock: !!v.AtDock,
+          departing_terminal_id: v.DepartingTerminalID,
+          departing_terminal: v.DepartingTerminalName,
+          arriving_terminal_id: v.ArrivingTerminalID,
+          arriving_terminal: v.ArrivingTerminalName,
+          latitude: v.Latitude,
+          longitude: v.Longitude,
+          speed_knots: v.Speed || 0.0,
+          heading: v.Heading || 0,
+          scheduled_departure: parseDotNetDate(v.ScheduledDeparture),
+          scheduled_departure_hhmm: parseTimeHhmm(v.ScheduledDeparture),
+          left_dock: parseDotNetDate(v.LeftDock),
+          left_dock_hhmm: parseTimeHhmm(v.LeftDock),
+          eta: parseDotNetDate(v.Eta),
+          eta_hhmm: parseTimeHhmm(v.Eta),
+          eta_basis: v.EtaBasis,
+          timestamp: tsIso
+        });
+      }
+      return triangleVessels;
+    }
+
     function parseIsoTimestamp(ts) {
       if (!ts) return null;
       if (typeof ts === 'number') return ts;
@@ -638,10 +717,10 @@
         currentData.am_commute.evaluated_targets = {};
       }
 
-      if (currentData.schedule_mode === '2-boat') {
+      if (currentData.schedule_mode === '2-boat' || currentData.service_status === 'route_out_of_service' || currentData.service_status === 'suspended') {
         if (currentData.am_commute.evaluated_targets.ghost_ferry) {
           delete currentData.am_commute.evaluated_targets.ghost_ferry;
-          if (activeDirection === 'AM') renderCommuteTargets();
+          if (activeDirection === 'AM') renderTargetSailings();
         }
         return;
       }
@@ -971,11 +1050,24 @@
       // Query live AIS telemetry immediately on initial page load
       pollVesselTelemetry();
 
-      // Fast Loop: Poll AIS vessel telemetry for the map independently every 30s
-      setInterval(pollVesselTelemetry, 30000);
+      // Fast Loop: Poll AIS vessel telemetry every 30s only when tab is actively visible
+      setInterval(() => {
+        if (document.hidden) return;
+        pollVesselTelemetry();
+      }, 30000);
 
-      // Slow Loop: Check for timetable/schedule/bulletin updates every 5 minutes
-      setInterval(fetchLiveUpdates, 300000);
+      // Refresh immediately whenever the user switches back to this tab
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          pollVesselTelemetry();
+        }
+      });
+
+      // Slow Loop: Check for timetable/schedule/bulletin updates every 5 minutes (if visible)
+      setInterval(() => {
+        if (document.hidden) return;
+        fetchLiveUpdates();
+      }, 300000);
     }
 
 
@@ -1044,9 +1136,14 @@
         pmBtn.innerHTML = '<span>🌇 PM: Return & Sports</span>';
       }
 
+      const isOutOfService = currentData.service_status === 'route_out_of_service' || currentData.service_status === 'suspended' || (currentData.mode_display && currentData.mode_display.includes('Out of Service'));
       const hasCancelled = currentData.has_cancelled_sailings || (currentData.cancelled_vessels && currentData.cancelled_vessels.length > 0) || currentData.service_status === 'cancelled_sailings';
-      if (hasCancelled) {
-        modeTextEl.innerText = currentData.mode_display || '3-Boat (Cancelled Sailings)';
+      if (isOutOfService) {
+        modeTextEl.innerText = currentData.mode_display || (mode === '2-boat' ? '2-Boat (Route Out of Service)' : 'Route Out of Service');
+        modeBadge.className = 'px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 text-xs font-bold tracking-wide flex items-center gap-1.5 shadow-sm';
+        modeDot.className = 'w-2 h-2 rounded-full bg-red-400 animate-ping';
+      } else if (hasCancelled) {
+        modeTextEl.innerText = currentData.mode_display || (mode === '2-boat' ? '2-Boat (Cancelled Sailings)' : '3-Boat (Cancelled Sailings)');
         modeBadge.className = 'px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-bold tracking-wide flex items-center gap-1.5';
         modeDot.className = 'w-2 h-2 rounded-full bg-amber-400';
       } else if (mode === '2-boat') {
@@ -1079,7 +1176,7 @@
 
       const modelTag = document.getElementById('ai-model-tag');
       if (modelTag) {
-        modelTag.innerText = currentData.ai_model || 'Gemini Flash';
+        modelTag.innerText = currentData.ai_model || 'Heuristic Engine';
       }
     }
 
@@ -1563,8 +1660,8 @@
         return;
       }
 
-      // 1. Resolve endpoint: local dev proxy or static data.json on S3 (never invokes Lambda directly)
-      let endpoint = 'data.json';
+      // 1. Resolve endpoint: local dev proxy, API Gateway proxy, or static data.json on S3 (zero Lambda invocations)
+      let endpoint = currentData.vessels_api_url || 'data.json';
       if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
         endpoint = '/api/vessels';
       }
@@ -1583,15 +1680,32 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
-        const freshVessels = data.vessels_telemetry || data.vessels;
+        let freshVessels = null;
+        if (Array.isArray(data)) {
+          // Direct raw WSDOT vessels array (forwarded via API Gateway HTTP_PROXY)
+          freshVessels = parseRawWsdotVessels(data);
+          let maxEpoch = 0;
+          for (const v of freshVessels) {
+            if (v.timestamp) {
+              const t = Date.parse(v.timestamp);
+              if (t > maxEpoch) maxEpoch = t;
+            }
+          }
+          currentData.timestamp_epoch = maxEpoch > 0 ? (maxEpoch / 1000) : (Date.now() / 1000);
+          currentData.timestamp = new Date(currentData.timestamp_epoch * 1000).toISOString();
+        } else if (data && typeof data === 'object') {
+          // Object format from data.json or local dev proxy
+          freshVessels = data.vessels_telemetry || data.vessels;
+          if (data.timestamp_epoch) {
+            currentData.timestamp_epoch = data.timestamp_epoch;
+          }
+          if (data.timestamp) {
+            currentData.timestamp = data.timestamp;
+          }
+        }
+
         if (freshVessels && freshVessels.length) {
           currentData.vessels_telemetry = freshVessels;
-        }
-        if (data.timestamp_epoch) {
-          currentData.timestamp_epoch = data.timestamp_epoch;
-        }
-        if (data.timestamp) {
-          currentData.timestamp = data.timestamp;
         }
 
         clearTimeout(timeoutId);

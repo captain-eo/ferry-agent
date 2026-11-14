@@ -16,7 +16,7 @@ Parameters:
   ScheduleCron:
     Type: String
     Default: "rate(15 minutes)"
-    Description: EventBridge invocation schedule (e.g. rate(4 minutes)).
+    Description: EventBridge invocation schedule (e.g. rate(15 minutes)).
 
 Resources:
   # S3 Bucket for Static Website Hosting
@@ -92,6 +92,7 @@ Resources:
           S3_BUCKET_NAME: !Ref FerryWebsiteBucket
           GEMINI_API_KEY: !Ref GeminiApiKey
           GEMINI_MODEL: !Ref GeminiModel
+          VESSELS_API_URL: !Sub "https://${WsdotProxyApi}.execute-api.${AWS::Region}.amazonaws.com/vessels"
       Code:
         ZipFile: |
           def lambda_handler(event, context):

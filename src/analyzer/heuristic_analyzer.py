@@ -10,7 +10,7 @@ import math
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
 
-from src.config import VISD_COMMUTE_RULES, STANDARD_CROSSING_MINUTES, VESSELS_API_URL
+from src.config import VISD_COMMUTE_RULES, STANDARD_CROSSING_MINUTES, VESSELS_API_URL, PACIFIC_TZ
 from src.collectors.wsdot_api import parse_time_hh_mm
 
 FAUNTLEROY_LAT = 47.5235
@@ -45,8 +45,8 @@ STANDARD_3_BOAT_V_TO_F = [
 
 
 def get_current_pacific_time() -> datetime:
-    """Returns current Pacific Time."""
-    return datetime.now(timezone(timedelta(hours=-7)))
+    """Returns current Pacific Time (handles PST/PDT automatically)."""
+    return datetime.now(PACIFIC_TZ)
 
 
 def time_str_to_minutes(hhmm: str) -> int:
@@ -609,9 +609,13 @@ def evaluate_commute(
         is_next_day=is_next_day
     )
 
-    if has_cancelled:
-        vessel_str = ", ".join(cancelled_vessels) if cancelled_vessels else "Sealth"
-        mode_display = f"3-Boat ({vessel_str} Cancelled)"
+    if service_status in ("route_out_of_service", "suspended"):
+        base_prefix = "2-Boat" if mode == "2-boat" else "3-Boat"
+        mode_display = f"{base_prefix} (Route Out of Service - Crew Shortage)"
+    elif has_cancelled:
+        vessel_str = ", ".join(cancelled_vessels) if cancelled_vessels else "Sailings"
+        base_prefix = "2-Boat" if mode == "2-boat" else "3-Boat"
+        mode_display = f"{base_prefix} ({vessel_str} Cancelled)"
     elif mode == "2-boat":
         mode_display = "2-Boat Contingency Schedule"
     else:
@@ -641,6 +645,9 @@ def evaluate_commute(
         "bulletin_mode_reason": mode_reason,
         "disruption_reason": disruption_reason,
         "executive_briefing": briefing,
+        "ai_provider": "deterministic_heuristic_engine",
+        "ai_model": "Heuristic Engine",
+        "ai_cached": False,
         "am_commute": am_eval,
         "pm_commute": pm_eval,
         "vessels_telemetry": vessels,
@@ -813,12 +820,14 @@ def _evaluate_direction_commute(
 
         live_vessel = vessel_map.get(vessel_name.lower()) if vessel_name else None
 
-        # Check for vessel cancellation / lack of crew
-        if target_hhmm in exact_cancelled_set:
+        # Check for route-wide suspension or vessel cancellation
+        if service_status in ("route_out_of_service", "suspended"):
+            is_cancelled = True
+        elif target_hhmm in exact_cancelled_set:
             is_cancelled = True
         elif vessel_name.lower() in cancelled_lower and vessel_name.lower() not in restored_lower:
-            # If live telemetry verifies vessel is active in water, it is operating
-            if live_vessel and live_vessel.get("in_service") is True and (live_vessel.get("speed_knots", 0) > 0 or live_vessel.get("at_dock")):
+            # If live telemetry verifies vessel is underway sailing, it is operating
+            if live_vessel and live_vessel.get("in_service") is True and live_vessel.get("speed_knots", 0) > 2.0:
                 is_cancelled = False
             else:
                 is_cancelled = True
@@ -834,45 +843,55 @@ def _evaluate_direction_commute(
                     is_cancelled = True
 
         if is_cancelled:
-            reason_label = disruption_reason or "Crew Shortage"
-            status = f"Out of Service ({reason_label})"
-            catchability = "MISSED"
-            next_sailing = _find_next_operating_sailing(
-                scheduled_list, target_hhmm, cancelled_lower, exact_cancelled=exact_cancelled, is_am=is_am
-            )
-
-            if is_am:
-                if key == "vhs_mcm":
-                    if next_sailing:
-                        bus_note = (
-                            f"⚠️ No 7:05 AM boat ({reason_label}). "
-                            f"Next available departure is {next_sailing['time']} ({next_sailing['vessel']}), "
-                            f"arriving Vashon ~{next_sailing['arr_time']} (misses 7:35 AM bus)."
-                        )
-                    else:
-                        bus_note = f"⚠️ No 7:05 AM boat ({reason_label}). Normal 7:35 AM bus connection will be missed."
-                elif key == "ces":
-                    if next_sailing:
-                        bus_note = f"⚠️ No 8:05 AM boat ({reason_label}). Next available boat is {next_sailing['time']} ({next_sailing['vessel']})."
-                    else:
-                        bus_note = f"⚠️ No 8:05 AM boat ({reason_label})."
-                else:
-                    bus_note = f"⚠️ No {minutes_to_12hr(target_hhmm)} boat ({reason_label})."
+            if service_status in ("route_out_of_service", "suspended"):
+                reason_label = disruption_reason or "Route Out of Service (Crew Shortage)"
+                status = "Route Out of Service"
+                catchability = "MISSED"
+                bus_note = (
+                    f"🚨 **Route Out of Service**: Washington State Ferries has suspended the Fauntleroy/Vashon/Southworth route "
+                    f"due to crew shortages. This {minutes_to_12hr(target_hhmm)} sailing is suspended."
+                )
             else:
-                if key == "vhs_mcm":
-                    if next_sailing:
-                        bus_note = (
-                            f"⚠️ No 3:25 PM dismissal boat ({reason_label}). "
-                            f"Next departure to Fauntleroy: {next_sailing['time']} ({next_sailing['vessel']}), "
-                            f"arriving Fauntleroy ~{next_sailing['arr_time']}."
-                        )
+                reason_label = disruption_reason or "Crew Shortage"
+                status = f"Out of Service ({reason_label})"
+                catchability = "MISSED"
+                next_sailing = _find_next_operating_sailing(
+                    scheduled_list, target_hhmm, cancelled_lower, exact_cancelled=exact_cancelled, is_am=is_am
+                )
+
+                target_disp = minutes_to_12hr(target_hhmm)
+                if is_am:
+                    if key == "vhs_mcm":
+                        if next_sailing:
+                            bus_note = (
+                                f"⚠️ No {target_disp} boat ({reason_label}). "
+                                f"Next available departure is {next_sailing['time']} ({next_sailing['vessel']}), "
+                                f"arriving Vashon ~{next_sailing['arr_time']}."
+                            )
+                        else:
+                            bus_note = f"⚠️ No {target_disp} boat ({reason_label}). Normal school bus connection will be missed."
+                    elif key == "ces":
+                        if next_sailing:
+                            bus_note = f"⚠️ No {target_disp} boat ({reason_label}). Next available boat is {next_sailing['time']} ({next_sailing['vessel']})."
+                        else:
+                            bus_note = f"⚠️ No {target_disp} boat ({reason_label})."
                     else:
-                        bus_note = f"⚠️ No 3:25 PM dismissal boat ({reason_label})."
+                        bus_note = f"⚠️ No {target_disp} boat ({reason_label})."
                 else:
-                    if next_sailing:
-                        bus_note = f"⚠️ No {minutes_to_12hr(target_hhmm)} boat ({reason_label}). Next departure: {next_sailing['time']} ({next_sailing['vessel']})."
+                    if key == "vhs_mcm":
+                        if next_sailing:
+                            bus_note = (
+                                f"⚠️ No 3:25 PM dismissal boat ({reason_label}). "
+                                f"Next departure to Fauntleroy: {next_sailing['time']} ({next_sailing['vessel']}), "
+                                f"arriving Fauntleroy ~{next_sailing['arr_time']}."
+                            )
+                        else:
+                            bus_note = f"⚠️ No 3:25 PM dismissal boat ({reason_label})."
                     else:
-                        bus_note = f"⚠️ No {minutes_to_12hr(target_hhmm)} boat ({reason_label})."
+                        if next_sailing:
+                            bus_note = f"⚠️ No {minutes_to_12hr(target_hhmm)} boat ({reason_label}). Next departure: {next_sailing['time']} ({next_sailing['vessel']})."
+                        else:
+                            bus_note = f"⚠️ No {minutes_to_12hr(target_hhmm)} boat ({reason_label})."
         else:
             # Not cancelled: compute live delays and connection catchability
             if not is_weekend and not is_next_day and live_vessel:
@@ -1033,14 +1052,30 @@ def _generate_heuristic_briefing(
     parts = []
     ghost_target = am_eval["evaluated_targets"].get("ghost_ferry", {})
 
-    if cancelled_vessels:
-        msg = (
-            f"⚠️ **Crew Shortage Alert (3-Boat Schedule with Cancelled Sailings)**: "
-            f"The M/V {vessel_names} is out of service due to {reason.lower()}, cancelling all #3 sailings. "
-            f"The route continues on the **3-boat schedule** with Kittitas and Kitsap (NOT an official 2-boat schedule change). "
-            f"The **7:05 AM Fauntleroy departure is CANCELLED**; next available boat is the **8:05 AM (Kittitas)**. "
-            f"The 8:05 AM CES elementary sailing is running on time."
+    if service_status in ("route_out_of_service", "suspended"):
+        base_desc = "two-boat contingency" if mode == "2-boat" else "three-boat"
+        return (
+            f"🚨 **Route Out of Service Alert ({base_desc.capitalize()} Schedule)**: "
+            f"Washington State Ferries reports that the entire **Fauntleroy / Vashon / Southworth route is OUT OF SERVICE due to a severe shortage of crew**. "
+            f"All morning school commute departures are currently suspended and vessels remain tied up at the dock. "
+            f"Dispatch is actively attempting to secure relief crews. Families should monitor VISD school communications and WSF travel alerts for service updates."
         )
+
+    if cancelled_vessels:
+        if mode == "2-boat":
+            msg = (
+                f"⚠️ **Crew Shortage Alert (Two-Boat Schedule with Cancelled Sailings)**: "
+                f"The route is operating on the published **two-boat schedule**, but is experiencing cancellations for {vessel_names} due to {reason.lower()}. "
+                f"Check specific departure times below for impacts to school bus connections."
+            )
+        else:
+            msg = (
+                f"⚠️ **Crew Shortage Alert (3-Boat Schedule with Cancelled Sailings)**: "
+                f"The M/V {vessel_names} is out of service due to {reason.lower()}, cancelling all #3 sailings. "
+                f"The route continues on the **3-boat schedule** with remaining vessels (NOT an official 2-boat schedule change). "
+                f"The **7:05 AM Fauntleroy departure is CANCELLED**; next available boat is the **8:05 AM (Kittitas)**. "
+                f"The 8:05 AM CES elementary sailing is running on time."
+            )
         if ghost_target.get("is_detected") and not ghost_target.get("is_thursday_hazmat"):
             msg += (
                 f" ⚠️ **Unscheduled Ferry Detected (Not Recommended)**: {ghost_target.get('vessel_name')} detected at/operating Fauntleroy "

@@ -6,6 +6,9 @@ commute rules (including Friday PDD late start and sports/after-school buses).
 
 import os
 from typing import Dict, Any
+from zoneinfo import ZoneInfo
+
+PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 # WSDOT Endpoints
 WSDOT_VESSEL_LOCATIONS_URL = "https://www.wsdot.wa.gov/Ferries/API/Vessels/rest/vessellocations"
@@ -26,7 +29,8 @@ OP_ROUTE_FVS = "f-v-s"
 # Crossing time estimate (minutes) between Fauntleroy & Vashon
 STANDARD_CROSSING_MINUTES = 20
 
-# Gemini Settings
+# Gemini / AI Summary Settings (set to False to use deterministic heuristic summary)
+ENABLE_AI_SUMMARY = os.getenv("ENABLE_AI_SUMMARY", "false").lower() in ("true", "1")
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
@@ -43,7 +47,7 @@ COMMUTE_SCHEDULE = {
 
 # AWS Settings
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "vashon-ferry-commute")
-VESSELS_API_URL = ""
+VESSELS_API_URL = os.getenv("VESSELS_API_URL", "")
 
 # VISD Commuter Schedule Rules
 VISD_COMMUTE_RULES: Dict[str, Any] = {

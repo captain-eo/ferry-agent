@@ -24,14 +24,14 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 import boto3
-from src.config import S3_BUCKET_NAME, VESSELS_API_URL
+from src.config import S3_BUCKET_NAME, VESSELS_API_URL, PACIFIC_TZ, ENABLE_AI_SUMMARY
 from src.collectors.wsdot_api import get_merged_ferry_telemetry, fetch_enriched_triangle_vessels
 from src.collectors.bulletin_scraper import scrape_bulletins
+from src.analyzer.heuristic_analyzer import evaluate_commute
 from src.analyzer.gemini_analyzer import analyze_commute_with_gemini
 from src.generator.site_generator import generate_static_site
 
 LOCAL_TMP_DIR = "/tmp/vashon_ferry_dist"
-PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 
 def is_http_request(event: Dict[str, Any]) -> bool:
@@ -69,8 +69,6 @@ def handle_http_telemetry_request(event: Dict[str, Any]) -> Dict[str, Any]:
             "body": ""
         }
 
-    raw_path = event.get("rawPath") or event.get("path", "")
-    print(f"[HTTP-API] Received {method} request for '{raw_path}'")
     start_time = time.time()
 
     try:
@@ -113,38 +111,47 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     bucket_name = os.getenv("S3_BUCKET_NAME", S3_BUCKET_NAME)
     s3 = boto3.client("s3")
 
-    # 1. Try to fetch previous AI state from S3 to avoid cold-start LLM invocations
-    cached_ai_state = None
-    if bucket_name and bucket_name != "vashon-ferry-commute":
-        try:
-            s3_obj = s3.get_object(Bucket=bucket_name, Key="data.json")
-            prev_data = json.loads(s3_obj["Body"].read().decode("utf-8"))
-            if "state_fingerprint" in prev_data:
-                cached_ai_state = {
-                    "fingerprint": prev_data.get("state_fingerprint"),
-                    "executive_briefing": prev_data.get("executive_briefing"),
-                    "ai_insights": prev_data.get("ai_insights", []),
-                    "ai_parent_action_items": prev_data.get("ai_parent_action_items", []),
-                    "ai_model": prev_data.get("ai_model"),
-                    "timestamp_epoch": prev_data.get("timestamp_epoch", 0),
-                }
-        except Exception:
-            pass
-
-    # 2. Ingest telemetry & bulletins
+    # 1. Ingest telemetry & bulletins
     print("[INFO] Ingesting WSDOT telemetry and bulletins...")
     telemetry = get_merged_ferry_telemetry()
     bulletins = scrape_bulletins()
     
-    # 3. Run Gemini Flash analysis (with state fingerprinting & caching)
-    force_ai = event.get("force_ai", False)
-    analysis = analyze_commute_with_gemini(
-        telemetry=telemetry,
-        bulletins_data=bulletins,
-        cached_ai_state=cached_ai_state,
-        force_ai_refresh=force_ai
-    )
+    # 2. Evaluate commute conditions
+    if ENABLE_AI_SUMMARY:
+        cached_ai_state = None
+        if bucket_name and bucket_name != "vashon-ferry-commute":
+            try:
+                s3_obj = s3.get_object(Bucket=bucket_name, Key="data.json")
+                prev_data = json.loads(s3_obj["Body"].read().decode("utf-8"))
+                if "state_fingerprint" in prev_data:
+                    cached_ai_state = {
+                        "fingerprint": prev_data.get("state_fingerprint"),
+                        "executive_briefing": prev_data.get("executive_briefing"),
+                        "ai_insights": prev_data.get("ai_insights", []),
+                        "ai_parent_action_items": prev_data.get("ai_parent_action_items", []),
+                        "ai_model": prev_data.get("ai_model"),
+                        "timestamp_epoch": prev_data.get("timestamp_epoch", 0),
+                    }
+            except Exception:
+                pass
+
+        force_ai = event.get("force_ai", False)
+        analysis = analyze_commute_with_gemini(
+            telemetry=telemetry,
+            bulletins_data=bulletins,
+            cached_ai_state=cached_ai_state,
+            force_ai_refresh=force_ai
+        )
+    else:
+        print("[INFO] Using deterministic heuristic summary (AI summary disabled).")
+        analysis = evaluate_commute(telemetry=telemetry, bulletins_data=bulletins)
+        analysis["ai_provider"] = "deterministic_heuristic_engine"
+        analysis["ai_model"] = "Heuristic Engine"
+        analysis["ai_cached"] = False
     analysis["timestamp_epoch"] = time.time()
+    vessels_api_url = os.getenv("VESSELS_API_URL", VESSELS_API_URL)
+    if vessels_api_url:
+        analysis["vessels_api_url"] = vessels_api_url
     
     # 4. Generate static site files
     print(f"[INFO] Rendering static site into {LOCAL_TMP_DIR}...")

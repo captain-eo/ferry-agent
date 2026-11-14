@@ -16,7 +16,7 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from src.config import DEFAULT_GEMINI_MODEL, GEMINI_API_KEY
+from src.config import DEFAULT_GEMINI_MODEL, GEMINI_API_KEY, ENABLE_AI_SUMMARY
 from src.analyzer.heuristic_analyzer import evaluate_commute, get_current_pacific_time
 
 GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -108,9 +108,9 @@ def analyze_commute_with_gemini(
     current_fingerprint = compute_schedule_state_fingerprint(heuristic_result, bulletins_data)
     heuristic_result["state_fingerprint"] = current_fingerprint
     
-    if not key:
+    if not ENABLE_AI_SUMMARY or not key:
         heuristic_result["ai_provider"] = "deterministic_heuristic_engine"
-        heuristic_result["ai_model"] = "heuristic_v1"
+        heuristic_result["ai_model"] = "Heuristic Engine"
         heuristic_result["ai_cached"] = False
         return heuristic_result
 
