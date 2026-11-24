@@ -1197,6 +1197,133 @@ class TestFerryCommutePipeline(unittest.TestCase):
                 self.assertTrue(target["is_cancelled"])
                 self.assertEqual(target["catchability"], "MISSED")
 
+    def test_pd_tah_out_of_service_mentioning_fvs_alternate_is_excluded(self):
+        """
+        Verifies that a Point Defiance / Tahlequah (PD/Tah) route-out-of-service bulletin
+        mentioning Fauntleroy/Vashon/Southworth as an alternate route in the body is NOT
+        treated as a Triangle Route outage.
+        """
+        from unittest.mock import patch
+        from src.collectors.bulletin_scraper import scrape_bulletins
+
+        html = """
+        <html>
+        <body>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinDate_0">[Last Updated: Tuesday, November 24, 2026 02:41 PM]</span>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinTitle_0">PD/Tah - Route out of service, due to lack of crew. Will return for 340pm PD</span>
+            <span id="cphPageTemplate_rprBulletins_lblContent_0">Due to a shortage of crew, the M/V Chetzemoka will tie up prior to the 2:40 p.m. Point Defiance to Tahlequah departure. Customers will need to use the Fauntleroy/Vashon/Southworth route for an alternate ferry route to and from Vashon Island.</span>
+
+            <span id="cphPageTemplate_rprBulletins_lblBulletinDate_1">[Last Updated: Monday, November 23, 2026 08:37 AM]</span>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinTitle_1">Service during Thanksgiving weekend</span>
+            <span id="cphPageTemplate_rprBulletins_lblContent_1">Extreme tidal conditions will cause sailing cancellations on Port Townsend/Coupeville. Point Defiance/Tahlequah may see adjustments. Seattle/Bainbridge and Fauntleroy/Vashon/Southworth will run holiday schedules.</span>
+        </body>
+        </html>
+        """
+
+        class MockResp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+            def read(self):
+                return html.encode("utf-8")
+
+        tue_dt = datetime(2026, 11, 24, 15, 30, tzinfo=timezone(timedelta(hours=-8)))
+        with patch("urllib.request.urlopen", return_value=MockResp()), \
+             patch("src.collectors.bulletin_scraper.fetch_route_cancellations", return_value={"legend": {}, "cancellations_by_date": {}}), \
+             patch("src.collectors.bulletin_scraper.datetime") as mock_dt:
+            mock_dt.now.return_value = tue_dt
+            mock_dt.strptime = datetime.strptime
+            mock_dt.min = datetime.min
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            res = scrape_bulletins()
+            self.assertEqual(res["service_status"], "normal")
+            self.assertEqual(res["schedule_mode"], "3-boat")
+            self.assertEqual(res["cancelled_vessels"], [])
+            titles = [b["title"] for b in res["triangle_bulletins"]]
+            self.assertNotIn("PD/Tah - Route out of service, due to lack of crew. Will return for 340pm PD", titles)
+            self.assertIn("Service during Thanksgiving weekend", titles)
+            holiday_b = [b for b in res["triangle_bulletins"] if b["title"] == "Service during Thanksgiving weekend"][0]
+            self.assertFalse(holiday_b["is_fvs_operational"])
+
+    def test_newer_restoration_supersedes_older_route_out_of_service(self):
+        """Verifies a newer F/V/S back-in-service bulletin supersedes an older route-out-of-service bulletin."""
+        from unittest.mock import patch
+        from src.collectors.bulletin_scraper import scrape_bulletins
+
+        html = """
+        <html>
+        <body>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinDate_0">[Last Updated: Monday, October 5, 2026 09:00 AM]</span>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinTitle_0">Faunt/Va/SW - Route back in service</span>
+            <span id="cphPageTemplate_rprBulletins_lblContent_0">The Fauntleroy/Vashon/Southworth route has returned to service and is back on the three-boat schedule.</span>
+
+            <span id="cphPageTemplate_rprBulletins_lblBulletinDate_1">[Last Updated: Monday, October 5, 2026 06:30 AM]</span>
+            <span id="cphPageTemplate_rprBulletins_lblBulletinTitle_1">Faunt/Va/SW - Route out of service due to shortage of crew</span>
+            <span id="cphPageTemplate_rprBulletins_lblContent_1">Due to a shortage of crew, the Fauntleroy/Vashon/Southworth route is out of service.</span>
+        </body>
+        </html>
+        """
+
+        class MockResp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+            def read(self):
+                return html.encode("utf-8")
+
+        mon_dt = datetime(2026, 10, 5, 9, 15, tzinfo=timezone(timedelta(hours=-7)))
+        with patch("urllib.request.urlopen", return_value=MockResp()), \
+             patch("src.collectors.bulletin_scraper.fetch_route_cancellations", return_value={"legend": {}, "cancellations_by_date": {}}), \
+             patch("src.collectors.bulletin_scraper.datetime") as mock_dt:
+            mock_dt.now.return_value = mon_dt
+            mock_dt.strptime = datetime.strptime
+            mock_dt.min = datetime.min
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            res = scrape_bulletins()
+            self.assertEqual(res["service_status"], "normal")
+            self.assertEqual(res["schedule_mode"], "3-boat")
+            self.assertEqual(res["cancelled_vessels"], [])
+
+    def test_ais_underway_reconciles_stale_route_out_of_service(self):
+        """Verifies live AIS showing underway Triangle vessels clears stale route_out_of_service status."""
+        tue_dt = datetime(2026, 11, 24, 15, 30, tzinfo=timezone(timedelta(hours=-8)))
+        dummy_telemetry = {
+            "vessels": [
+                {"name": "Kittitas", "in_service": True, "at_dock": False, "speed_knots": 13.8},
+                {"name": "Cathlamet", "in_service": True, "at_dock": True, "speed_knots": 0.0},
+                {"name": "Issaquah", "in_service": True, "at_dock": True, "speed_knots": 0.1},
+            ],
+            "schedule": {
+                "fauntleroy_to_vashon": [
+                    {"time_hhmm": "07:05", "vessel_name": "Issaquah"},
+                    {"time_hhmm": "08:05", "vessel_name": "Kittitas"},
+                ],
+                "vashon_to_fauntleroy": [
+                    {"time_hhmm": "15:25", "vessel_name": "Issaquah"},
+                    {"time_hhmm": "16:40", "vessel_name": "Kittitas"},
+                    {"time_hhmm": "17:45", "vessel_name": "Cathlamet"},
+                ],
+            },
+        }
+        stale_bulletins = {
+            "schedule_mode": "3-boat",
+            "service_status": "route_out_of_service",
+            "cancelled_vessels": ["Cathlamet", "Kittitas"],
+            "disruption_reason": "Shortage of crew (all sailings suspended)",
+            "triangle_bulletins": [],
+        }
+
+        eval_res = evaluate_commute(dummy_telemetry, stale_bulletins, simulated_time=tue_dt)
+        self.assertEqual(eval_res["service_status"], "normal")
+        self.assertEqual(eval_res["cancelled_vessels"], [])
+        self.assertFalse(eval_res["has_cancelled_sailings"])
+        self.assertEqual(eval_res["mode_display"], "3-Boat Schedule (Normal)")
+        self.assertFalse(eval_res["am_commute"]["evaluated_targets"]["vhs_mcm"]["is_cancelled"])
+
 
 if __name__ == "__main__":
     unittest.main()

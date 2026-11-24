@@ -343,6 +343,8 @@ def evaluate_commute(
         tomorrow_reason = f"Operating on normal {target_day_name} three-boat schedule."
         
         for b in bulletins_data.get("triangle_bulletins", []):
+            if b.get("is_fvs_operational") is False:
+                continue
             b_text = f"{b.get('title', '')} {b.get('content', '')}".lower()
             has_tomorrow = target_day_lower in b_text or target_day_lower[:3] in b_text
             is_ufn = "until further notice" in b_text and not any(
@@ -384,6 +386,8 @@ def evaluate_commute(
             # Check if active bulletins explicitly apply to tomorrow or say "until further notice"
             tomorrow_bulletin_cancels = []
             for b in bulletins_data.get("triangle_bulletins", []):
+                if b.get("is_fvs_operational") is False:
+                    continue
                 b_text = f"{b.get('title', '')} {b.get('content', '')}".lower()
                 if "until further notice" in b_text or target_day_name.lower() in b_text:
                     if "shortage of crew" in b_text or "cancelled sailings" in b_text:
@@ -455,6 +459,8 @@ def evaluate_commute(
         has_explicit_2boat_bulletin = False
         target_name_lower = target_day_name.lower()
         for b in bulletins_data.get("triangle_bulletins", []):
+            if b.get("is_fvs_operational") is False:
+                continue
             b_text = f"{b.get('title', '')} {b.get('content', '')}".lower()
             if (target_name_lower in b_text or (is_weekend and "monday" in b_text)) and (
                 "two-boat" in b_text or "2-boat" in b_text or "two boat" in b_text or "2 boat" in b_text
@@ -498,9 +504,22 @@ def evaluate_commute(
         exact_cancelled_f_to_v = bulletins_data.get("exact_cancelled_f_to_v", [])
         exact_cancelled_v_to_f = bulletins_data.get("exact_cancelled_v_to_f", [])
     
-    # Reconcile cancelled_vessels against live AIS telemetry:
-    # If a vessel is reporting in_service=True and underway or at dock on the route,
-    # and has no upcoming cancellations in exact_cancelled, it has returned to schedule!
+    # Reconcile route-out-of-service and cancelled_vessels against live AIS telemetry:
+    # 1. If the entire route is marked out of service, but live AIS shows Triangle vessels
+    #    actively underway (in_service=True and speed > 2 kts), the route is operating.
+    if not is_weekend and not is_next_day and service_status in ("route_out_of_service", "suspended"):
+        underway_triangle = [
+            v for v in vessels
+            if v.get("in_service") is True and (v.get("speed_knots") or 0) > 2.0
+        ]
+        if underway_triangle:
+            service_status = "reduced_2boat" if mode == "2-boat" else "normal"
+            disruption_reason = ""
+            cancelled_vessels = []
+            has_cancelled = False
+
+    # 2. If a vessel is reporting in_service=True and underway or at dock on the route,
+    #    and has no upcoming cancellations in exact_cancelled, it has returned to schedule!
     if not is_weekend and not is_next_day and cancelled_vessels:
         current_hhmm = f"{now.hour:02d}:{now.minute:02d}"
         active_cancelled = []
